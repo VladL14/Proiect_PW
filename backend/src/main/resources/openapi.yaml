@@ -1,638 +1,66 @@
 openapi: 3.0.0
 info:
-  description: API for multiplayer dice game with round-based mechanics
   title: Dice Duel API
   version: 1.1.0
+  description: API for multiplayer dice game with round-based mechanics
 servers:
-- url: http://localhost:3000/api
+  - url: http://localhost:3000/api
 paths:
   /players:
-    get:
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlayerList"
-          description: List of players
-      summary: Get all players
-      x-accepts:
-      - application/json
     post:
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreatePlayerRequest"
-        required: true
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Player"
-          description: Player created
       summary: Create player
-      x-content-type: application/json
-      x-accepts:
-      - application/json
+    get:
+      summary: Get all players
   /players/{playerId}:
     get:
-      parameters:
-      - explode: false
-        in: path
-        name: playerId
-        required: true
-        schema:
-          type: string
-        style: simple
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Player"
-          description: Player found
       summary: Get player
-      x-accepts:
-      - application/json
   /players/{playerId}/stats:
     get:
-      parameters:
-      - explode: false
-        in: path
-        name: playerId
-        required: true
-        schema:
-          type: string
-        style: simple
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlayerStats"
-          description: Player stats
       summary: Get player stats
-      x-accepts:
-      - application/json
   /players/{playerId}/abilities:
     get:
-      parameters:
-      - explode: false
-        in: path
-        name: playerId
-        required: true
-        schema:
-          type: string
-        style: simple
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AbilityList"
-          description: Player abilities
       summary: Get player abilities
-      x-accepts:
-      - application/json
   /players/{playerId}/avatar:
     post:
-      parameters:
-      - explode: false
-        in: path
-        name: playerId
-        required: true
-        schema:
-          type: string
-        style: simple
-      requestBody:
-        content:
-          multipart/form-data:
-            schema:
-              $ref: "#/components/schemas/_players__playerId__avatar_post_request"
-      responses:
-        "200":
-          description: Avatar uploaded
       summary: Upload avatar
-      x-content-type: multipart/form-data
-      x-accepts:
-      - application/json
   /matches:
-    get:
-      parameters:
-      - explode: true
-        in: query
-        name: status
-        required: false
-        schema:
-          $ref: "#/components/schemas/MatchStatus"
-        style: form
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MatchList"
-          description: Match list
-      summary: Get matches (optional filter)
-      x-accepts:
-      - application/json
     post:
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateMatchRequest"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Match"
-          description: Match created
       summary: Create match
-      x-content-type: application/json
-      x-accepts:
-      - application/json
+    get:
+      summary: Get matches
   /matches/{matchId}:
     get:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Match"
-          description: Match found
       summary: Get match
-      x-accepts:
-      - application/json
   /matches/{matchId}/join:
     post:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/_matches__matchId__join_post_request"
-      responses:
-        "200":
-          description: Player joined
       summary: Join match
-      x-content-type: application/json
-      x-accepts:
-      - application/json
   /matches/{matchId}/start:
     post:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      responses:
-        "200":
-          description: Match started
       summary: Start match
-      x-accepts:
-      - application/json
   /matches/{matchId}/state:
     get:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/MatchState"
-          description: Match state
       summary: Get match state
-      x-accepts:
-      - application/json
   /matches/{matchId}/rounds/{roundId}:
     get:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      - explode: false
-        in: path
-        name: roundId
-        required: true
-        schema:
-          type: string
-        style: simple
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Round"
-          description: Round data
       summary: Get round
-      x-accepts:
-      - application/json
   /matches/{matchId}/rounds/{roundId}/roll:
     post:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      - explode: false
-        in: path
-        name: roundId
-        required: true
-        schema:
-          type: string
-        style: simple
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/_matches__matchId__rounds__roundId__roll_post_request"
-      responses:
-        "200":
-          description: Dice rolled
       summary: Roll dice
-      x-content-type: application/json
-      x-accepts:
-      - application/json
   /matches/{matchId}/rounds/{roundId}/lock:
     post:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      - explode: false
-        in: path
-        name: roundId
-        required: true
-        schema:
-          type: string
-        style: simple
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/_matches__matchId__rounds__roundId__lock_post_request"
-      responses:
-        "200":
-          description: Dice locked
       summary: Lock dice
-      x-content-type: application/json
-      x-accepts:
-      - application/json
   /matches/{matchId}/rounds/{roundId}/resolve:
     post:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      - explode: false
-        in: path
-        name: roundId
-        required: true
-        schema:
-          type: string
-        style: simple
-      responses:
-        "200":
-          description: Round resolved
       summary: Resolve round
-      x-accepts:
-      - application/json
   /abilities:
     get:
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AbilityList"
-          description: Ability list
       summary: Get abilities
-      x-accepts:
-      - application/json
   /matches/{matchId}/rounds/{roundId}/abilities/activate:
     post:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      - explode: false
-        in: path
-        name: roundId
-        required: true
-        schema:
-          type: string
-        style: simple
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/_matches__matchId__rounds__roundId__abilities_activate_post_request"
-      responses:
-        "200":
-          description: Ability activated
       summary: Activate ability
-      x-content-type: application/json
-      x-accepts:
-      - application/json
   /matches/{matchId}/replay/export:
     get:
-      parameters:
-      - explode: false
-        in: path
-        name: matchId
-        required: true
-        schema:
-          type: string
-        style: simple
-      responses:
-        "200":
-          description: Replay file
       summary: Export replay
-      x-accepts:
-      - application/json
   /ability-packs/import:
     post:
-      requestBody:
-        content:
-          multipart/form-data:
-            schema:
-              $ref: "#/components/schemas/_players__playerId__avatar_post_request"
-      responses:
-        "200":
-          description: Ability pack imported
       summary: Import ability pack
-      x-content-type: multipart/form-data
-      x-accepts:
-      - application/json
-components:
-  parameters:
-    playerId:
-      explode: false
-      in: path
-      name: playerId
-      required: true
-      schema:
-        type: string
-      style: simple
-    matchId:
-      explode: false
-      in: path
-      name: matchId
-      required: true
-      schema:
-        type: string
-      style: simple
-    roundId:
-      explode: false
-      in: path
-      name: roundId
-      required: true
-      schema:
-        type: string
-      style: simple
-  schemas:
-    MatchStatus:
-      enum:
-      - WAITING
-      - READY
-      - IN_PROGRESS
-      - FINISHED
-      type: string
-    RoundStatus:
-      enum:
-      - INITIALIZED
-      - ROLLING
-      - TARGET_SELECTION
-      - ABILITY_PHASE
-      - RESOLVED
-      type: string
-    DiceFace:
-      enum:
-      - ATTACK
-      - SHIELD
-      - STEAL
-      type: string
-    Player:
-      example:
-        name: name
-        hearts: 0
-        tokens: 6
-        id: id
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        hearts:
-          type: integer
-        tokens:
-          type: integer
-      type: object
-    PlayerList:
-      items:
-        $ref: "#/components/schemas/Player"
-      type: array
-    PlayerStats:
-      example:
-        wins: 0
-        losses: 6
-      properties:
-        wins:
-          type: integer
-        losses:
-          type: integer
-      type: object
-    CreatePlayerRequest:
-      example:
-        name: name
-      properties:
-        name:
-          type: string
-      required:
-      - name
-      type: object
-    Match:
-      example:
-        players:
-        - name: name
-          hearts: 0
-          tokens: 6
-          id: id
-        - name: name
-          hearts: 0
-          tokens: 6
-          id: id
-        id: id
-        status: WAITING
-      properties:
-        id:
-          type: string
-        status:
-          $ref: "#/components/schemas/MatchStatus"
-        players:
-          items:
-            $ref: "#/components/schemas/Player"
-          type: array
-      type: object
-    MatchList:
-      items:
-        $ref: "#/components/schemas/Match"
-      type: array
-    MatchState:
-      example:
-        currentRound: 0
-        players:
-        - name: name
-          hearts: 0
-          tokens: 6
-          id: id
-        - name: name
-          hearts: 0
-          tokens: 6
-          id: id
-      properties:
-        currentRound:
-          type: integer
-        players:
-          items:
-            $ref: "#/components/schemas/Player"
-          type: array
-      type: object
-    CreateMatchRequest:
-      example:
-        maxPlayers: 0
-        hostPlayerId: hostPlayerId
-      properties:
-        hostPlayerId:
-          type: string
-        maxPlayers:
-          type: integer
-      type: object
-    Round:
-      example:
-        dice:
-        - ATTACK
-        - ATTACK
-        id: id
-        locked:
-        - true
-        - true
-        status: INITIALIZED
-      properties:
-        id:
-          type: string
-        status:
-          $ref: "#/components/schemas/RoundStatus"
-        dice:
-          items:
-            $ref: "#/components/schemas/DiceFace"
-          type: array
-        locked:
-          items:
-            type: boolean
-          type: array
-      type: object
-    Ability:
-      example:
-        cost: 0
-        name: name
-        id: id
-      properties:
-        id:
-          type: string
-        name:
-          type: string
-        cost:
-          type: integer
-      type: object
-    AbilityList:
-      items:
-        $ref: "#/components/schemas/Ability"
-      type: array
-    _players__playerId__avatar_post_request:
-      properties:
-        file:
-          format: binary
-          type: string
-      type: object
-    _matches__matchId__join_post_request:
-      properties:
-        playerId:
-          type: string
-      required:
-      - playerId
-      type: object
-    _matches__matchId__rounds__roundId__roll_post_request:
-      properties:
-        playerId:
-          type: string
-      type: object
-    _matches__matchId__rounds__roundId__lock_post_request:
-      properties:
-        playerId:
-          type: string
-        lockedIndexes:
-          items:
-            type: integer
-          type: array
-      type: object
-    _matches__matchId__rounds__roundId__abilities_activate_post_request:
-      properties:
-        playerId:
-          type: string
-        abilityId:
-          type: string
-        targetId:
-          type: string
-      required:
-      - abilityId
-      - playerId
-      type: object
