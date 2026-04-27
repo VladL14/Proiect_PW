@@ -1,9 +1,12 @@
 package com.diceduel.service;
 
+import com.diceduel.dto.AddPlayerAbilityRequest;
 import com.diceduel.dto.AbilityResponse;
 import com.diceduel.dto.CreatePlayerRequest;
+import com.diceduel.dto.PatchPlayerRequest;
 import com.diceduel.dto.PlayerResponse;
 import com.diceduel.dto.PlayerStatsResponse;
+import com.diceduel.dto.UpdatePlayerRequest;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -20,6 +23,12 @@ public interface PlayerService {
      * @return created player representation
      */
     PlayerResponse createPlayer(CreatePlayerRequest request);
+
+    PlayerResponse replacePlayer(String playerId, UpdatePlayerRequest request);
+
+    PlayerResponse patchPlayer(String playerId, PatchPlayerRequest request);
+
+    void deletePlayer(String playerId);
 
     /**
      * Retrieves all players registered in the game.
@@ -59,4 +68,10 @@ public interface PlayerService {
      * @param file uploaded avatar file
      */
     void uploadAvatar(String playerId, MultipartFile file);
+
+    void deleteAvatar(String playerId);
+
+    List<AbilityResponse> addPlayerAbility(String playerId, AddPlayerAbilityRequest request);
+
+    List<AbilityResponse> removePlayerAbility(String playerId, String abilityId);
 }

@@ -6,8 +6,14 @@ import com.diceduel.dto.JoinMatchRequest;
 import com.diceduel.dto.LockDiceRequest;
 import com.diceduel.dto.MatchResponse;
 import com.diceduel.dto.MatchStateResponse;
+import com.diceduel.dto.PatchMatchRequest;
+import com.diceduel.dto.PatchRoundRequest;
 import com.diceduel.dto.RollDiceRequest;
 import com.diceduel.dto.RoundResponse;
+import com.diceduel.dto.UpdateLockedDiceRequest;
+import com.diceduel.dto.UpdateMatchRequest;
+import com.diceduel.dto.UpdateMatchStatusRequest;
+import com.diceduel.dto.UpdateRoundRequest;
 import com.diceduel.entity.AbilityEntity;
 import com.diceduel.entity.DiceFace;
 import com.diceduel.entity.MatchEntity;
@@ -84,6 +90,43 @@ public class MatchServiceImpl implements MatchService {
     }
 
     @Override
+    public MatchResponse replaceMatch(String matchId, UpdateMatchRequest request) {
+        MatchEntity match = findMatchEntity(matchId);
+        validateMatchConfigEditable(match);
+        validateMaxPlayers(match, request.maxPlayers());
+
+        match.setMaxPlayers(request.maxPlayers());
+        refreshLobbyStatus(match);
+        return matchMapper.toResponse(matchRepository.save(match));
+    }
+
+    @Override
+    public MatchResponse patchMatch(String matchId, PatchMatchRequest request) {
+        MatchEntity match = findMatchEntity(matchId);
+
+        if (request.maxPlayers() != null) {
+            validateMatchConfigEditable(match);
+            validateMaxPlayers(match, request.maxPlayers());
+            match.setMaxPlayers(request.maxPlayers());
+            refreshLobbyStatus(match);
+        }
+        if (request.status() != null) {
+            applyMatchStatus(match, request.status());
+        }
+
+        return matchMapper.toResponse(matchRepository.save(match));
+    }
+
+    @Override
+    public void deleteMatch(String matchId) {
+        MatchEntity match = findMatchEntity(matchId);
+        if (match.getStatus() == MatchStatus.IN_PROGRESS) {
+            throw new BadRequestException("In-progress matches cannot be deleted");
+        }
+        matchRepository.delete(match);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public List<MatchResponse> findMatches(MatchStatus status) {
         List<MatchEntity> matches = status == null
@@ -117,6 +160,18 @@ public class MatchServiceImpl implements MatchService {
     }
 
     @Override
+    public void removePlayerFromMatch(String matchId, String playerId) {
+        MatchEntity match = findMatchEntity(matchId);
+        validateMatchConfigEditable(match);
+        boolean removed = match.getPlayers().removeIf(player -> player.getId().equals(playerId));
+        if (!removed) {
+            throw new ResourceNotFoundException("Player not found in match: " + playerId);
+        }
+        refreshLobbyStatus(match);
+        matchRepository.save(match);
+    }
+
+    @Override
     public void startMatch(String matchId) {
         MatchEntity match = findMatchEntity(matchId);
         validateMatchStartable(match);
@@ -129,6 +184,13 @@ public class MatchServiceImpl implements MatchService {
     }
 
     @Override
+    public MatchResponse updateMatchStatus(String matchId, UpdateMatchStatusRequest request) {
+        MatchEntity match = findMatchEntity(matchId);
+        applyMatchStatus(match, request.status());
+        return matchMapper.toResponse(matchRepository.save(match));
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public MatchStateResponse findMatchState(String matchId) {
         return matchMapper.toStateResponse(findMatchEntity(matchId));
@@ -138,6 +200,47 @@ public class MatchServiceImpl implements MatchService {
     @Transactional(readOnly = true)
     public RoundResponse findRound(String matchId, String roundId) {
         return roundMapper.toResponse(findRoundEntity(matchId, roundId));
+    }
+
+    @Override
+    public RoundResponse replaceRound(String matchId, String roundId, UpdateRoundRequest request) {
+        RoundEntity round = findRoundEntity(matchId, roundId);
+        round.setStatus(request.status());
+        round.setDice(validateDice(request.dice()));
+        round.setLocked(validateLockedDice(request.locked()));
+        return roundMapper.toResponse(roundRepository.save(round));
+    }
+
+    @Override
+    public RoundResponse patchRound(String matchId, String roundId, PatchRoundRequest request) {
+        RoundEntity round = findRoundEntity(matchId, roundId);
+
+        if (request.status() != null) {
+            round.setStatus(request.status());
+        }
+        if (request.dice() != null) {
+            round.setDice(validateDice(request.dice()));
+        }
+        if (request.locked() != null) {
+            round.setLocked(validateLockedDice(request.locked()));
+        }
+
+        return roundMapper.toResponse(roundRepository.save(round));
+    }
+
+    @Override
+    public void deleteRound(String matchId, String roundId) {
+        RoundEntity round = findRoundEntity(matchId, roundId);
+        MatchEntity match = round.getMatch();
+        match.getRounds().removeIf(existing -> existing.getId().equals(roundId));
+        roundRepository.delete(round);
+
+        int latestRoundNumber = match.getRounds().stream()
+                .map(RoundEntity::getRoundNumber)
+                .max(Integer::compareTo)
+                .orElse(0);
+        match.setCurrentRoundNumber(latestRoundNumber);
+        matchRepository.save(match);
     }
 
     @Override
@@ -165,6 +268,15 @@ public class MatchServiceImpl implements MatchService {
         round.setLocked(locked);
         round.setStatus(RoundStatus.TARGET_SELECTION);
         roundRepository.save(round);
+    }
+
+    @Override
+    public RoundResponse updateLockedDice(String matchId, String roundId, UpdateLockedDiceRequest request) {
+        RoundEntity round = findRoundEntity(matchId, roundId);
+        validateDiceAlreadyRolled(round);
+        round.setLocked(validateLockedDice(request.locked()));
+        round.setStatus(RoundStatus.TARGET_SELECTION);
+        return roundMapper.toResponse(roundRepository.save(round));
     }
 
     @Override
@@ -255,6 +367,63 @@ public class MatchServiceImpl implements MatchService {
      */
     private Integer resolveMaxPlayers(Integer requestedMaxPlayers) {
         return requestedMaxPlayers == null ? DEFAULT_MAX_PLAYERS : requestedMaxPlayers;
+    }
+
+    /**
+     * Ensures that lobby configuration changes do not affect active matches.
+     *
+     * @param match match being modified
+     */
+    private void validateMatchConfigEditable(MatchEntity match) {
+        if (match.getStatus() == MatchStatus.IN_PROGRESS || match.getStatus() == MatchStatus.FINISHED) {
+            throw new BadRequestException("Only waiting or ready matches can be modified");
+        }
+    }
+
+    /**
+     * Ensures the configured player limit can still contain the current lobby.
+     *
+     * @param match match being modified
+     * @param maxPlayers requested maximum player count
+     */
+    private void validateMaxPlayers(MatchEntity match, Integer maxPlayers) {
+        if (maxPlayers < match.getPlayers().size()) {
+            throw new BadRequestException("Max players cannot be lower than current player count");
+        }
+    }
+
+    /**
+     * Keeps the lobby status aligned with the configured capacity.
+     *
+     * @param match match whose lobby status may change
+     */
+    private void refreshLobbyStatus(MatchEntity match) {
+        if (match.getStatus() == MatchStatus.IN_PROGRESS || match.getStatus() == MatchStatus.FINISHED) {
+            return;
+        }
+        match.setStatus(match.getPlayers().size() >= match.getMaxPlayers()
+                ? MatchStatus.READY
+                : MatchStatus.WAITING);
+    }
+
+    /**
+     * Applies a direct status patch while preserving required side effects.
+     *
+     * @param match match being patched
+     * @param status requested status
+     */
+    private void applyMatchStatus(MatchEntity match, MatchStatus status) {
+        if (status == MatchStatus.IN_PROGRESS) {
+            validateMatchStartable(match);
+            if (match.getRounds().isEmpty()) {
+                match.setCurrentRoundNumber(1);
+                match.getRounds().add(createRound(match, 1));
+            }
+        }
+        if (status == MatchStatus.WAITING || status == MatchStatus.READY) {
+            validateMatchConfigEditable(match);
+        }
+        match.setStatus(status);
     }
 
     /**
@@ -367,9 +536,35 @@ public class MatchServiceImpl implements MatchService {
     private List<Boolean> ensureLockList(List<Boolean> locked) {
         List<Boolean> normalized = new ArrayList<>();
         for (int i = 0; i < DICE_COUNT; i++) {
-            normalized.add(i < locked.size() && Boolean.TRUE.equals(locked.get(i)));
+            normalized.add(locked != null && i < locked.size() && Boolean.TRUE.equals(locked.get(i)));
         }
         return normalized;
+    }
+
+    /**
+     * Validates a directly supplied dice list for round update endpoints.
+     *
+     * @param dice dice values from the request
+     * @return copied dice values
+     */
+    private List<DiceFace> validateDice(List<DiceFace> dice) {
+        if (dice.size() > DICE_COUNT) {
+            throw new BadRequestException("A round cannot contain more than " + DICE_COUNT + " dice");
+        }
+        return new ArrayList<>(dice);
+    }
+
+    /**
+     * Validates a directly supplied lock list for round update endpoints.
+     *
+     * @param locked locked dice values from the request
+     * @return copied lock values
+     */
+    private List<Boolean> validateLockedDice(List<Boolean> locked) {
+        if (locked.size() != DICE_COUNT) {
+            throw new BadRequestException("Locked dice list must contain exactly " + DICE_COUNT + " values");
+        }
+        return new ArrayList<>(locked);
     }
 
     /**
