@@ -6,8 +6,14 @@ import com.diceduel.dto.JoinMatchRequest;
 import com.diceduel.dto.LockDiceRequest;
 import com.diceduel.dto.MatchResponse;
 import com.diceduel.dto.MatchStateResponse;
+import com.diceduel.dto.PatchMatchRequest;
+import com.diceduel.dto.PatchRoundRequest;
 import com.diceduel.dto.RollDiceRequest;
 import com.diceduel.dto.RoundResponse;
+import com.diceduel.dto.UpdateLockedDiceRequest;
+import com.diceduel.dto.UpdateMatchRequest;
+import com.diceduel.dto.UpdateMatchStatusRequest;
+import com.diceduel.dto.UpdateRoundRequest;
 import com.diceduel.entity.MatchStatus;
 import org.springframework.core.io.ByteArrayResource;
 
@@ -25,6 +31,12 @@ public interface MatchService {
      * @return created match representation
      */
     MatchResponse createMatch(CreateMatchRequest request);
+
+    MatchResponse replaceMatch(String matchId, UpdateMatchRequest request);
+
+    MatchResponse patchMatch(String matchId, PatchMatchRequest request);
+
+    void deleteMatch(String matchId);
 
     /**
      * Retrieves matches, optionally filtered by status.
@@ -50,12 +62,16 @@ public interface MatchService {
      */
     void joinMatch(String matchId, JoinMatchRequest request);
 
+    void removePlayerFromMatch(String matchId, String playerId);
+
     /**
      * Starts a ready match and creates its first round.
      *
      * @param matchId match identifier
      */
     void startMatch(String matchId);
+
+    MatchResponse updateMatchStatus(String matchId, UpdateMatchStatusRequest request);
 
     /**
      * Retrieves the current state of a match.
@@ -74,6 +90,12 @@ public interface MatchService {
      */
     RoundResponse findRound(String matchId, String roundId);
 
+    RoundResponse replaceRound(String matchId, String roundId, UpdateRoundRequest request);
+
+    RoundResponse patchRound(String matchId, String roundId, PatchRoundRequest request);
+
+    void deleteRound(String matchId, String roundId);
+
     /**
      * Rolls the dice for the selected round.
      *
@@ -91,6 +113,8 @@ public interface MatchService {
      * @param request lock request
      */
     void lockDice(String matchId, String roundId, LockDiceRequest request);
+
+    RoundResponse updateLockedDice(String matchId, String roundId, UpdateLockedDiceRequest request);
 
     /**
      * Resolves a round and either creates the next round or finishes the match.

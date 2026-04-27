@@ -5,62 +5,892 @@ info:
   description: API for multiplayer dice game with round-based mechanics
 servers:
   - url: http://localhost:3000/api
+
 paths:
   /players:
     post:
       summary: Create player
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlayerRequest'
+      responses:
+        '201':
+          description: Player created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
     get:
       summary: Get all players
+      responses:
+        '200':
+          description: Player list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerList'
+
   /players/{playerId}:
+    parameters:
+      - $ref: '#/components/parameters/playerId'
     get:
       summary: Get player
+      responses:
+        '200':
+          description: Player found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
+    put:
+      summary: Replace player
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePlayerRequest'
+      responses:
+        '200':
+          description: Player replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
+    patch:
+      summary: Patch player
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchPlayerRequest'
+      responses:
+        '200':
+          description: Player patched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Player'
+    delete:
+      summary: Delete player
+      responses:
+        '204':
+          description: Player deleted
+
   /players/{playerId}/stats:
     get:
       summary: Get player stats
+      parameters:
+        - $ref: '#/components/parameters/playerId'
+      responses:
+        '200':
+          description: Player stats
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlayerStats'
+
   /players/{playerId}/abilities:
+    parameters:
+      - $ref: '#/components/parameters/playerId'
     get:
       summary: Get player abilities
+      responses:
+        '200':
+          description: Player abilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbilityList'
+    post:
+      summary: Add ability to player
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddPlayerAbilityRequest'
+      responses:
+        '200':
+          description: Updated player abilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbilityList'
+
+  /players/{playerId}/abilities/{abilityId}:
+    delete:
+      summary: Remove ability from player
+      parameters:
+        - $ref: '#/components/parameters/playerId'
+        - $ref: '#/components/parameters/abilityId'
+      responses:
+        '200':
+          description: Updated player abilities
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbilityList'
+
   /players/{playerId}/avatar:
+    parameters:
+      - $ref: '#/components/parameters/playerId'
     post:
       summary: Upload avatar
+      requestBody:
+        $ref: '#/components/requestBodies/FileUpload'
+      responses:
+        '200':
+          description: Avatar uploaded
+    put:
+      summary: Replace avatar
+      requestBody:
+        $ref: '#/components/requestBodies/FileUpload'
+      responses:
+        '200':
+          description: Avatar replaced
+    delete:
+      summary: Delete avatar
+      responses:
+        '204':
+          description: Avatar deleted
+
   /matches:
     post:
       summary: Create match
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMatchRequest'
+      responses:
+        '201':
+          description: Match created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Match'
     get:
       summary: Get matches
+      parameters:
+        - in: query
+          name: status
+          schema:
+            $ref: '#/components/schemas/MatchStatus'
+      responses:
+        '200':
+          description: Match list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchList'
+
   /matches/{matchId}:
+    parameters:
+      - $ref: '#/components/parameters/matchId'
     get:
       summary: Get match
+      responses:
+        '200':
+          description: Match found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Match'
+    put:
+      summary: Replace match configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMatchRequest'
+      responses:
+        '200':
+          description: Match replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Match'
+    patch:
+      summary: Patch match
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchMatchRequest'
+      responses:
+        '200':
+          description: Match patched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Match'
+    delete:
+      summary: Delete match
+      responses:
+        '204':
+          description: Match deleted
+
   /matches/{matchId}/join:
     post:
       summary: Join match
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinMatchRequest'
+      responses:
+        '200':
+          description: Player joined
+
+  /matches/{matchId}/players/{playerId}:
+    delete:
+      summary: Remove player from match
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+        - $ref: '#/components/parameters/playerId'
+      responses:
+        '204':
+          description: Player removed from match
+
   /matches/{matchId}/start:
     post:
       summary: Start match
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+      responses:
+        '200':
+          description: Match started
+
+  /matches/{matchId}/status:
+    patch:
+      summary: Update match status
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMatchStatusRequest'
+      responses:
+        '200':
+          description: Match status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Match'
+
   /matches/{matchId}/state:
     get:
       summary: Get match state
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+      responses:
+        '200':
+          description: Match state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatchState'
+
   /matches/{matchId}/rounds/{roundId}:
+    parameters:
+      - $ref: '#/components/parameters/matchId'
+      - $ref: '#/components/parameters/roundId'
     get:
       summary: Get round
+      responses:
+        '200':
+          description: Round data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Round'
+    put:
+      summary: Replace round
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoundRequest'
+      responses:
+        '200':
+          description: Round replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Round'
+    patch:
+      summary: Patch round
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchRoundRequest'
+      responses:
+        '200':
+          description: Round patched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Round'
+    delete:
+      summary: Delete round
+      responses:
+        '204':
+          description: Round deleted
+
   /matches/{matchId}/rounds/{roundId}/roll:
     post:
       summary: Roll dice
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+        - $ref: '#/components/parameters/roundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RollDiceRequest'
+      responses:
+        '200':
+          description: Dice rolled
+
   /matches/{matchId}/rounds/{roundId}/lock:
     post:
       summary: Lock dice
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+        - $ref: '#/components/parameters/roundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LockDiceRequest'
+      responses:
+        '200':
+          description: Dice locked
+
+  /matches/{matchId}/rounds/{roundId}/locked-dice:
+    patch:
+      summary: Update locked dice
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+        - $ref: '#/components/parameters/roundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLockedDiceRequest'
+      responses:
+        '200':
+          description: Locked dice updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Round'
+
   /matches/{matchId}/rounds/{roundId}/resolve:
     post:
       summary: Resolve round
-  /abilities:
-    get:
-      summary: Get abilities
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+        - $ref: '#/components/parameters/roundId'
+      responses:
+        '200':
+          description: Round resolved
+
   /matches/{matchId}/rounds/{roundId}/abilities/activate:
     post:
       summary: Activate ability
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+        - $ref: '#/components/parameters/roundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateAbilityRequest'
+      responses:
+        '200':
+          description: Ability activated
+
   /matches/{matchId}/replay/export:
     get:
       summary: Export replay
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+      responses:
+        '200':
+          description: Replay file
+          content:
+            text/plain:
+              schema:
+                type: string
+                format: binary
+
+  /abilities:
+    get:
+      summary: Get abilities
+      responses:
+        '200':
+          description: Ability list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbilityList'
+    post:
+      summary: Create ability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAbilityRequest'
+      responses:
+        '201':
+          description: Ability created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ability'
+
+  /abilities/{abilityId}:
+    parameters:
+      - $ref: '#/components/parameters/abilityId'
+    get:
+      summary: Get ability
+      responses:
+        '200':
+          description: Ability found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ability'
+    put:
+      summary: Replace ability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAbilityRequest'
+      responses:
+        '200':
+          description: Ability replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ability'
+    patch:
+      summary: Patch ability
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchAbilityRequest'
+      responses:
+        '200':
+          description: Ability patched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ability'
+    delete:
+      summary: Delete ability
+      responses:
+        '204':
+          description: Ability deleted
+
   /ability-packs/import:
     post:
       summary: Import ability pack
+      requestBody:
+        $ref: '#/components/requestBodies/FileUpload'
+      responses:
+        '200':
+          description: Ability pack imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbilityPack'
+
+  /ability-packs/{packId}:
+    parameters:
+      - $ref: '#/components/parameters/packId'
+    get:
+      summary: Get ability pack
+      responses:
+        '200':
+          description: Ability pack found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbilityPack'
+    put:
+      summary: Replace ability pack
+      requestBody:
+        $ref: '#/components/requestBodies/FileUpload'
+      responses:
+        '200':
+          description: Ability pack replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbilityPack'
+    patch:
+      summary: Patch ability pack metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchAbilityPackRequest'
+      responses:
+        '200':
+          description: Ability pack patched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AbilityPack'
+    delete:
+      summary: Delete ability pack
+      responses:
+        '204':
+          description: Ability pack deleted
+
+components:
+  parameters:
+    playerId:
+      name: playerId
+      in: path
+      required: true
+      schema:
+        type: string
+    matchId:
+      name: matchId
+      in: path
+      required: true
+      schema:
+        type: string
+    roundId:
+      name: roundId
+      in: path
+      required: true
+      schema:
+        type: string
+    abilityId:
+      name: abilityId
+      in: path
+      required: true
+      schema:
+        type: string
+    packId:
+      name: packId
+      in: path
+      required: true
+      schema:
+        type: string
+
+  requestBodies:
+    FileUpload:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file]
+            properties:
+              file:
+                type: string
+                format: binary
+
+  schemas:
+    MatchStatus:
+      type: string
+      enum: [WAITING, READY, IN_PROGRESS, FINISHED]
+    RoundStatus:
+      type: string
+      enum: [INITIALIZED, ROLLING, TARGET_SELECTION, ABILITY_PHASE, RESOLVED]
+    DiceFace:
+      type: string
+      enum: [ATTACK, SHIELD, STEAL]
+
+    Player:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        hearts:
+          type: integer
+        tokens:
+          type: integer
+    PlayerList:
+      type: array
+      items:
+        $ref: '#/components/schemas/Player'
+    PlayerStats:
+      type: object
+      properties:
+        wins:
+          type: integer
+        losses:
+          type: integer
+    CreatePlayerRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    UpdatePlayerRequest:
+      type: object
+      required: [name, hearts, tokens]
+      properties:
+        name:
+          type: string
+        hearts:
+          type: integer
+          minimum: 0
+        tokens:
+          type: integer
+          minimum: 0
+    PatchPlayerRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        hearts:
+          type: integer
+          minimum: 0
+        tokens:
+          type: integer
+          minimum: 0
+
+    Match:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          $ref: '#/components/schemas/MatchStatus'
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+    MatchList:
+      type: array
+      items:
+        $ref: '#/components/schemas/Match'
+    MatchState:
+      type: object
+      properties:
+        currentRound:
+          type: integer
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+    CreateMatchRequest:
+      type: object
+      required: [hostPlayerId]
+      properties:
+        hostPlayerId:
+          type: string
+        maxPlayers:
+          type: integer
+          minimum: 2
+          maximum: 8
+    UpdateMatchRequest:
+      type: object
+      required: [maxPlayers]
+      properties:
+        maxPlayers:
+          type: integer
+          minimum: 2
+          maximum: 8
+    PatchMatchRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/MatchStatus'
+        maxPlayers:
+          type: integer
+          minimum: 2
+          maximum: 8
+    UpdateMatchStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/MatchStatus'
+    JoinMatchRequest:
+      type: object
+      required: [playerId]
+      properties:
+        playerId:
+          type: string
+
+    Round:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          $ref: '#/components/schemas/RoundStatus'
+        dice:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiceFace'
+        locked:
+          type: array
+          items:
+            type: boolean
+    UpdateRoundRequest:
+      type: object
+      required: [status, dice, locked]
+      properties:
+        status:
+          $ref: '#/components/schemas/RoundStatus'
+        dice:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiceFace'
+        locked:
+          type: array
+          items:
+            type: boolean
+    PatchRoundRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/RoundStatus'
+        dice:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiceFace'
+        locked:
+          type: array
+          items:
+            type: boolean
+    RollDiceRequest:
+      type: object
+      required: [playerId]
+      properties:
+        playerId:
+          type: string
+    LockDiceRequest:
+      type: object
+      required: [playerId, lockedIndexes]
+      properties:
+        playerId:
+          type: string
+        lockedIndexes:
+          type: array
+          items:
+            type: integer
+    UpdateLockedDiceRequest:
+      type: object
+      required: [locked]
+      properties:
+        locked:
+          type: array
+          items:
+            type: boolean
+
+    Ability:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        cost:
+          type: integer
+    AbilityList:
+      type: array
+      items:
+        $ref: '#/components/schemas/Ability'
+    CreateAbilityRequest:
+      type: object
+      required: [name, cost]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        cost:
+          type: integer
+          minimum: 0
+    UpdateAbilityRequest:
+      type: object
+      required: [name, cost]
+      properties:
+        name:
+          type: string
+        cost:
+          type: integer
+          minimum: 0
+    PatchAbilityRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        cost:
+          type: integer
+          minimum: 0
+    AddPlayerAbilityRequest:
+      type: object
+      required: [abilityId]
+      properties:
+        abilityId:
+          type: string
+    ActivateAbilityRequest:
+      type: object
+      required: [playerId, abilityId]
+      properties:
+        playerId:
+          type: string
+        abilityId:
+          type: string
+        targetId:
+          type: string
+
+    AbilityPack:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        fileName:
+          type: string
+        contentType:
+          type: string
+    PatchAbilityPackRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string

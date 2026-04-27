@@ -2,8 +2,15 @@ package com.diceduel.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.ManyToMany;
 import jakarta.persistence.Table;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "players")
@@ -30,6 +37,14 @@ public class PlayerEntity {
     private String avatarFileName;
 
     private String avatarContentType;
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "player_abilities",
+            joinColumns = @JoinColumn(name = "player_id"),
+            inverseJoinColumns = @JoinColumn(name = "ability_id")
+    )
+    private List<AbilityEntity> abilities = new ArrayList<>();
 
     public PlayerEntity() {
     }
@@ -105,5 +120,13 @@ public class PlayerEntity {
 
     public void setAvatarContentType(String avatarContentType) {
         this.avatarContentType = avatarContentType;
+    }
+
+    public List<AbilityEntity> getAbilities() {
+        return abilities;
+    }
+
+    public void setAbilities(List<AbilityEntity> abilities) {
+        this.abilities = abilities;
     }
 }
