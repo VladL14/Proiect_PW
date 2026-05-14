@@ -38,6 +38,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
@@ -194,6 +195,17 @@ public class MatchServiceImpl implements MatchService {
     @Transactional(readOnly = true)
     public MatchStateResponse findMatchState(String matchId) {
         return matchMapper.toStateResponse(findMatchEntity(matchId));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<RoundResponse> findRounds(String matchId) {
+        MatchEntity match = findMatchEntity(matchId);
+        return match.getRounds()
+                .stream()
+                .sorted(Comparator.comparing(RoundEntity::getRoundNumber))
+                .map(roundMapper::toResponse)
+                .toList();
     }
 
     @Override

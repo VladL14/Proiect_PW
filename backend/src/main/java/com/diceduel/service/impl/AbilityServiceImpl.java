@@ -9,6 +9,7 @@ import com.diceduel.dto.UpdateAbilityRequest;
 import com.diceduel.entity.AbilityEntity;
 import com.diceduel.entity.AbilityPackEntity;
 import com.diceduel.exception.BadRequestException;
+import com.diceduel.exception.ConflictException;
 import com.diceduel.exception.ResourceNotFoundException;
 import com.diceduel.mapper.AbilityMapper;
 import com.diceduel.repository.AbilityPackRepository;
@@ -63,7 +64,7 @@ public class AbilityServiceImpl implements AbilityService {
                 ? UUID.randomUUID().toString()
                 : request.id().trim();
         if (abilityRepository.existsById(abilityId)) {
-            throw new BadRequestException("Ability already exists: " + abilityId);
+            throw new ConflictException("Ability already exists: " + abilityId);
         }
 
         AbilityEntity ability = new AbilityEntity(abilityId, normalizeName(request.name()), request.cost());
@@ -126,6 +127,15 @@ public class AbilityServiceImpl implements AbilityService {
 
     @Override
     @Transactional(readOnly = true)
+    public List<AbilityPackResponse> findAllAbilityPacks() {
+        return abilityPackRepository.findAll()
+                .stream()
+                .map(this::toPackResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public AbilityPackResponse findAbilityPack(String packId) {
         return toPackResponse(findAbilityPackEntity(packId));
     }
@@ -170,6 +180,10 @@ public class AbilityServiceImpl implements AbilityService {
                     .filter(line -> !line.isBlank())
                     .map(this::parseAbilityPackLine)
                     .toList();
+
+            if (abilities.isEmpty()) {
+                throw new BadRequestException("Ability pack must contain at least one ability");
+            }
 
             abilityRepository.saveAll(abilities);
         } catch (IOException exception) {

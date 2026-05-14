@@ -39,6 +39,8 @@ public interface AbilityService {
      */
     AbilityPackResponse importAbilityPack(MultipartFile file);
 
+    List<AbilityPackResponse> findAllAbilityPacks();
+
     AbilityPackResponse findAbilityPack(String packId);
 
     AbilityPackResponse replaceAbilityPack(String packId, MultipartFile file, String name, String description);
