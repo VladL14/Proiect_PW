@@ -31,6 +31,14 @@ public class GlobalExceptionHandler {
         return buildResponse(HttpStatus.BAD_REQUEST, exception.getMessage(), request.getRequestURI());
     }
 
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ErrorResponse> handleConflict(
+            ConflictException exception,
+            HttpServletRequest request
+    ) {
+        return buildResponse(HttpStatus.CONFLICT, exception.getMessage(), request.getRequestURI());
+    }
+
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ErrorResponse> handleTypeMismatch(
             MethodArgumentTypeMismatchException exception,

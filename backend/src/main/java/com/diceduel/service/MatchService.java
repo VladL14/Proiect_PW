@@ -81,6 +81,8 @@ public interface MatchService {
      */
     MatchStateResponse findMatchState(String matchId);
 
+    List<RoundResponse> findRounds(String matchId);
+
     /**
      * Retrieves one round from a match.
      *

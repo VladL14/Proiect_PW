@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/matches/{matchId}/rounds")
 public class RoundController {
@@ -27,6 +29,11 @@ public class RoundController {
 
     public RoundController(MatchService matchService) {
         this.matchService = matchService;
+    }
+
+    @GetMapping
+    public ResponseEntity<List<RoundResponse>> findRounds(@PathVariable String matchId) {
+        return ResponseEntity.ok(matchService.findRounds(matchId));
     }
 
     @GetMapping("/{roundId}")
