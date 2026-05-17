@@ -30,6 +30,8 @@ public class MatchEntity {
 
     private Integer currentRoundNumber;
 
+    private String currentTurnPlayerId;
+
     private LocalDateTime createdAt;
 
     @ManyToMany(fetch = FetchType.LAZY)
@@ -76,6 +78,14 @@ public class MatchEntity {
 
     public void setCurrentRoundNumber(Integer currentRoundNumber) {
         this.currentRoundNumber = currentRoundNumber;
+    }
+
+    public String getCurrentTurnPlayerId() {
+        return currentTurnPlayerId;
+    }
+
+    public void setCurrentTurnPlayerId(String currentTurnPlayerId) {
+        this.currentTurnPlayerId = currentTurnPlayerId;
     }
 
     public LocalDateTime getCreatedAt() {

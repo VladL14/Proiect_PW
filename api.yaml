@@ -398,6 +398,22 @@ paths:
         '200':
           description: Dice locked
 
+  /matches/{matchId}/rounds/{roundId}/target:
+    post:
+      summary: Set target for attack/steal
+      parameters:
+        - $ref: '#/components/parameters/matchId'
+        - $ref: '#/components/parameters/roundId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetTargetRequest'
+      responses:
+        '200':
+          description: Target set
+
   /matches/{matchId}/rounds/{roundId}/locked-dice:
     patch:
       summary: Update locked dice
@@ -775,6 +791,26 @@ components:
         playerId:
           type: string
 
+    PlayerRoundState:
+      type: object
+      properties:
+        playerId:
+          type: string
+        dice:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiceFace'
+        locked:
+          type: array
+          items:
+            type: boolean
+        rollsCount:
+          type: integer
+        diceTargets:
+          type: object
+          additionalProperties:
+            type: string
+
     Round:
       type: object
       properties:
@@ -782,45 +818,33 @@ components:
           type: string
         status:
           $ref: '#/components/schemas/RoundStatus'
-        dice:
+        playerStates:
           type: array
           items:
-            $ref: '#/components/schemas/DiceFace'
-        locked:
-          type: array
-          items:
-            type: boolean
+            $ref: '#/components/schemas/PlayerRoundState'
     RoundList:
       type: array
       items:
         $ref: '#/components/schemas/Round'
     UpdateRoundRequest:
       type: object
-      required: [status, dice, locked]
+      required: [status, playerStates]
       properties:
         status:
           $ref: '#/components/schemas/RoundStatus'
-        dice:
+        playerStates:
           type: array
           items:
-            $ref: '#/components/schemas/DiceFace'
-        locked:
-          type: array
-          items:
-            type: boolean
+            $ref: '#/components/schemas/PlayerRoundState'
     PatchRoundRequest:
       type: object
       properties:
         status:
           $ref: '#/components/schemas/RoundStatus'
-        dice:
+        playerStates:
           type: array
           items:
-            $ref: '#/components/schemas/DiceFace'
-        locked:
-          type: array
-          items:
-            type: boolean
+            $ref: '#/components/schemas/PlayerRoundState'
     RollDiceRequest:
       type: object
       required: [playerId]
@@ -837,6 +861,16 @@ components:
           type: array
           items:
             type: integer
+    SetTargetRequest:
+      type: object
+      required: [playerId, targetId]
+      properties:
+        playerId:
+          type: string
+        diceTargets:
+          type: object
+          additionalProperties:
+            type: string
     UpdateLockedDiceRequest:
       type: object
       required: [locked]

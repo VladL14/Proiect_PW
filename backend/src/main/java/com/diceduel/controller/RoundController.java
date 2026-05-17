@@ -91,6 +91,16 @@ public class RoundController {
         return ResponseEntity.ok().build();
     }
 
+    @PostMapping("/{roundId}/target")
+    public ResponseEntity<Void> setTarget(
+            @PathVariable String matchId,
+            @PathVariable String roundId,
+            @Valid @RequestBody com.diceduel.dto.SetTargetRequest request
+    ) {
+        matchService.setTarget(matchId, roundId, request);
+        return ResponseEntity.ok().build();
+    }
+
     @PatchMapping("/{roundId}/locked-dice")
     public ResponseEntity<RoundResponse> updateLockedDice(
             @PathVariable String matchId,

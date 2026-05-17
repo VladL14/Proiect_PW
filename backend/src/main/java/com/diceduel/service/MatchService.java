@@ -116,6 +116,8 @@ public interface MatchService {
      */
     void lockDice(String matchId, String roundId, LockDiceRequest request);
 
+    void setTarget(String matchId, String roundId, com.diceduel.dto.SetTargetRequest request);
+
     RoundResponse updateLockedDice(String matchId, String roundId, UpdateLockedDiceRequest request);
 
     /**

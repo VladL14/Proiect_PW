@@ -10,6 +10,7 @@ import com.diceduel.dto.PatchMatchRequest;
 import com.diceduel.dto.PatchRoundRequest;
 import com.diceduel.dto.RollDiceRequest;
 import com.diceduel.dto.RoundResponse;
+import com.diceduel.dto.SetTargetRequest;
 import com.diceduel.dto.UpdateLockedDiceRequest;
 import com.diceduel.dto.UpdateMatchRequest;
 import com.diceduel.dto.UpdateMatchStatusRequest;
@@ -19,6 +20,7 @@ import com.diceduel.entity.DiceFace;
 import com.diceduel.entity.MatchEntity;
 import com.diceduel.entity.MatchStatus;
 import com.diceduel.entity.PlayerEntity;
+import com.diceduel.entity.PlayerRoundStateEntity;
 import com.diceduel.entity.RoundEntity;
 import com.diceduel.entity.RoundStatus;
 import com.diceduel.exception.BadRequestException;
@@ -42,6 +44,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional
@@ -49,7 +52,6 @@ public class MatchServiceImpl implements MatchService {
 
     private static final int DEFAULT_MAX_PLAYERS = 2;
     private static final int DICE_COUNT = 5;
-    private static final int MAX_ROUNDS = 3;
 
     private final MatchRepository matchRepository;
     private final PlayerRepository playerRepository;
@@ -179,6 +181,7 @@ public class MatchServiceImpl implements MatchService {
 
         match.setStatus(MatchStatus.IN_PROGRESS);
         match.setCurrentRoundNumber(1);
+        match.setCurrentTurnPlayerId(match.getPlayers().get(0).getId());
         RoundEntity round = createRound(match, 1);
         match.getRounds().add(round);
         matchRepository.save(match);
@@ -218,25 +221,15 @@ public class MatchServiceImpl implements MatchService {
     public RoundResponse replaceRound(String matchId, String roundId, UpdateRoundRequest request) {
         RoundEntity round = findRoundEntity(matchId, roundId);
         round.setStatus(request.status());
-        round.setDice(validateDice(request.dice()));
-        round.setLocked(validateLockedDice(request.locked()));
         return roundMapper.toResponse(roundRepository.save(round));
     }
 
     @Override
     public RoundResponse patchRound(String matchId, String roundId, PatchRoundRequest request) {
         RoundEntity round = findRoundEntity(matchId, roundId);
-
         if (request.status() != null) {
             round.setStatus(request.status());
         }
-        if (request.dice() != null) {
-            round.setDice(validateDice(request.dice()));
-        }
-        if (request.locked() != null) {
-            round.setLocked(validateLockedDice(request.locked()));
-        }
-
         return roundMapper.toResponse(roundRepository.save(round));
     }
 
@@ -258,59 +251,185 @@ public class MatchServiceImpl implements MatchService {
     @Override
     public void rollDice(String matchId, String roundId, RollDiceRequest request) {
         RoundEntity round = findRoundEntity(matchId, roundId);
-        validatePlayerInMatch(round.getMatch(), request.playerId());
+        MatchEntity match = round.getMatch();
+        validatePlayerInMatch(match, request.playerId());
         validateRoundCanBePlayed(round);
+        
+        if (!request.playerId().equals(match.getCurrentTurnPlayerId())) {
+            throw new BadRequestException("It is not your turn!");
+        }
 
-        List<DiceFace> dice = buildRolledDice(round);
-        round.setDice(dice);
-        round.setLocked(ensureLockList(round.getLocked()));
-        round.setStatus(RoundStatus.ROLLING);
+        PlayerRoundStateEntity state = getPlayerState(round, request.playerId());
+        if (state.getRollsCount() >= 2) {
+            throw new BadRequestException("Maximum rolls reached for this round.");
+        }
+
+        List<DiceFace> currentDice = new ArrayList<>(state.getDice());
+        List<Boolean> locked = ensureLockList(state.getLocked());
+        List<DiceFace> diceFaces = Arrays.asList(DiceFace.values());
+        List<DiceFace> rolledDice = new ArrayList<>();
+
+        for (int i = 0; i < DICE_COUNT; i++) {
+            if (i < currentDice.size() && Boolean.TRUE.equals(locked.get(i))) {
+                rolledDice.add(currentDice.get(i));
+            } else {
+                rolledDice.add(diceFaces.get(random.nextInt(diceFaces.size())));
+            }
+        }
+
+        state.setDice(rolledDice);
+        state.setRollsCount(state.getRollsCount() + 1);
+        
+        if (state.getRollsCount() >= 2) {
+            List<Boolean> allLocked = new ArrayList<>();
+            for (int i = 0; i < DICE_COUNT; i++) allLocked.add(true);
+            state.setLocked(allLocked);
+            advanceTurn(match, round);
+        } else {
+            state.setLocked(ensureLockList(state.getLocked()));
+            round.setStatus(RoundStatus.ROLLING);
+        }
+        
         roundRepository.save(round);
+    }
+
+    private void advanceTurn(MatchEntity match, RoundEntity round) {
+        List<PlayerEntity> players = match.getPlayers().stream().filter(p -> p.getHearts() > 0).collect(Collectors.toList());
+        int currentIndex = -1;
+        for (int i = 0; i < players.size(); i++) {
+            if (players.get(i).getId().equals(match.getCurrentTurnPlayerId())) {
+                currentIndex = i;
+                break;
+            }
+        }
+        
+        if (currentIndex != -1 && currentIndex < players.size() - 1) {
+            match.setCurrentTurnPlayerId(players.get(currentIndex + 1).getId());
+        } else {
+            round.setStatus(RoundStatus.TARGET_SELECTION);
+            match.setCurrentTurnPlayerId(null);
+        }
     }
 
     @Override
     public void lockDice(String matchId, String roundId, LockDiceRequest request) {
         RoundEntity round = findRoundEntity(matchId, roundId);
-        validatePlayerInMatch(round.getMatch(), request.playerId());
-        validateDiceAlreadyRolled(round);
+        MatchEntity match = round.getMatch();
+        validatePlayerInMatch(match, request.playerId());
+        
+        if (!request.playerId().equals(match.getCurrentTurnPlayerId())) {
+            throw new BadRequestException("It is not your turn!");
+        }
 
-        List<Boolean> locked = new ArrayList<>(ensureLockList(round.getLocked()));
+        PlayerRoundStateEntity state = getPlayerState(round, request.playerId());
+        if (state.getDice() == null || state.getDice().isEmpty()) {
+            throw new BadRequestException("Dice must be rolled first");
+        }
+
+        List<Boolean> locked = new ArrayList<>(ensureLockList(state.getLocked()));
         request.lockedIndexes().forEach(index -> lockIndex(locked, index));
+        state.setLocked(locked);
+        
+        long lockCount = locked.stream().filter(b -> b != null && b).count();
+        if (lockCount == DICE_COUNT) {
+            state.setRollsCount(2);
+            advanceTurn(match, round);
+        }
+        
+        roundRepository.save(round);
+    }
 
-        round.setLocked(locked);
-        round.setStatus(RoundStatus.TARGET_SELECTION);
+    @Override
+    public void setTarget(String matchId, String roundId, SetTargetRequest request) {
+        RoundEntity round = findRoundEntity(matchId, roundId);
+        validatePlayerInMatch(round.getMatch(), request.playerId());
+        
+        PlayerRoundStateEntity state = getPlayerState(round, request.playerId());
+        if (request.diceTargets() != null) {
+            state.getDiceTargets().putAll(request.diceTargets());
+        }
         roundRepository.save(round);
     }
 
     @Override
     public RoundResponse updateLockedDice(String matchId, String roundId, UpdateLockedDiceRequest request) {
         RoundEntity round = findRoundEntity(matchId, roundId);
-        validateDiceAlreadyRolled(round);
-        round.setLocked(validateLockedDice(request.locked()));
-        round.setStatus(RoundStatus.TARGET_SELECTION);
         return roundMapper.toResponse(roundRepository.save(round));
     }
 
     @Override
     public void resolveRound(String matchId, String roundId) {
         RoundEntity round = findRoundEntity(matchId, roundId);
-        validateDiceAlreadyRolled(round);
 
         if (round.getStatus() == RoundStatus.RESOLVED) {
             throw new BadRequestException("Round is already resolved");
         }
 
-        rewardPlayers(round);
+        applyOrlogResolve(round);
         round.setStatus(RoundStatus.RESOLVED);
 
         MatchEntity match = round.getMatch();
-        if (round.getRoundNumber() >= MAX_ROUNDS) {
+        
+        long alivePlayers = match.getPlayers().stream().filter(p -> p.getHearts() > 0).count();
+        if (alivePlayers <= 1) {
             finishMatch(match);
         } else {
             createNextRound(match, round.getRoundNumber() + 1);
+            match.setCurrentTurnPlayerId(match.getPlayers().stream().filter(p -> p.getHearts() > 0).findFirst().get().getId());
         }
 
         matchRepository.save(match);
+    }
+
+    private void applyOrlogResolve(RoundEntity round) {
+        MatchEntity match = round.getMatch();
+        List<PlayerEntity> players = match.getPlayers();
+        
+        for (PlayerRoundStateEntity state : round.getPlayerStates()) {
+            long goldCount = state.getDice().stream().filter(d -> d.name().endsWith("_GOLD")).count();
+            PlayerEntity p = state.getPlayer();
+            p.setTokens(p.getTokens() + (int) goldCount);
+        }
+        
+        for (PlayerRoundStateEntity state : round.getPlayerStates()) {
+            for (int i = 0; i < state.getDice().size(); i++) {
+                DiceFace d = state.getDice().get(i);
+                if (d == DiceFace.STEAL || d == DiceFace.STEAL_GOLD) {
+                    String targetId = state.getDiceTargets().get(i);
+                    if (targetId != null) {
+                        PlayerEntity target = players.stream().filter(p -> p.getId().equals(targetId)).findFirst().orElse(null);
+                        if (target != null && target.getTokens() > 0) {
+                            target.setTokens(target.getTokens() - 1);
+                            state.getPlayer().setTokens(state.getPlayer().getTokens() + 1);
+                        }
+                    }
+                }
+            }
+        }
+        
+        java.util.Map<String, Integer> incomingAttacks = new java.util.HashMap<>();
+        for (PlayerRoundStateEntity state : round.getPlayerStates()) {
+            for (int i = 0; i < state.getDice().size(); i++) {
+                DiceFace d = state.getDice().get(i);
+                if (d == DiceFace.ATTACK || d == DiceFace.ATTACK_GOLD) {
+                    String targetId = state.getDiceTargets().get(i);
+                    if (targetId != null) {
+                        incomingAttacks.put(targetId, incomingAttacks.getOrDefault(targetId, 0) + 1);
+                    }
+                }
+            }
+        }
+        
+        for (PlayerRoundStateEntity targetState : round.getPlayerStates()) {
+            String pId = targetState.getPlayer().getId();
+            int attacks = incomingAttacks.getOrDefault(pId, 0);
+            if (attacks > 0) {
+                long shieldCount = targetState.getDice().stream().filter(td -> td == DiceFace.SHIELD || td == DiceFace.SHIELD_GOLD).count();
+                int damage = Math.max(0, attacks - (int)shieldCount);
+                PlayerEntity targetPlayer = targetState.getPlayer();
+                targetPlayer.setHearts(Math.max(0, targetPlayer.getHearts() - damage));
+            }
+        }
     }
 
     @Override
@@ -337,78 +456,51 @@ public class MatchServiceImpl implements MatchService {
         return new ByteArrayResource(replay.getBytes(StandardCharsets.UTF_8));
     }
 
-    /**
-     * Loads a match entity by identifier or fails with a not found exception.
-     *
-     * @param matchId match identifier
-     * @return existing match entity
-     */
+    private PlayerRoundStateEntity getPlayerState(RoundEntity round, String playerId) {
+        return round.getPlayerStates().stream()
+                .filter(s -> s.getPlayer().getId().equals(playerId))
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException("Player state not found in round"));
+    }
+
+    private PlayerRoundStateEntity getPlayerStateOrNull(RoundEntity round, String playerId) {
+        return round.getPlayerStates().stream()
+                .filter(s -> s.getPlayer().getId().equals(playerId))
+                .findFirst()
+                .orElse(null);
+    }
+
     private MatchEntity findMatchEntity(String matchId) {
         return matchRepository.findById(matchId)
                 .orElseThrow(() -> new ResourceNotFoundException("Match not found: " + matchId));
     }
 
-    /**
-     * Loads a player entity by identifier or fails with a not found exception.
-     *
-     * @param playerId player identifier
-     * @return existing player entity
-     */
     private PlayerEntity findPlayer(String playerId) {
         return playerRepository.findById(playerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Player not found: " + playerId));
     }
 
-    /**
-     * Loads a round only when it belongs to the requested match.
-     *
-     * @param matchId match identifier
-     * @param roundId round identifier
-     * @return existing round entity
-     */
     private RoundEntity findRoundEntity(String matchId, String roundId) {
         return roundRepository.findByMatch_IdAndId(matchId, roundId)
                 .orElseThrow(() -> new ResourceNotFoundException("Round not found: " + roundId));
     }
 
-    /**
-     * Decides the max player value when the request omits it.
-     *
-     * @param requestedMaxPlayers value received from the client
-     * @return resolved max player value
-     */
     private Integer resolveMaxPlayers(Integer requestedMaxPlayers) {
         return requestedMaxPlayers == null ? DEFAULT_MAX_PLAYERS : requestedMaxPlayers;
     }
 
-    /**
-     * Ensures that lobby configuration changes do not affect active matches.
-     *
-     * @param match match being modified
-     */
     private void validateMatchConfigEditable(MatchEntity match) {
         if (match.getStatus() == MatchStatus.IN_PROGRESS || match.getStatus() == MatchStatus.FINISHED) {
             throw new BadRequestException("Only waiting or ready matches can be modified");
         }
     }
 
-    /**
-     * Ensures the configured player limit can still contain the current lobby.
-     *
-     * @param match match being modified
-     * @param maxPlayers requested maximum player count
-     */
     private void validateMaxPlayers(MatchEntity match, Integer maxPlayers) {
         if (maxPlayers < match.getPlayers().size()) {
             throw new BadRequestException("Max players cannot be lower than current player count");
         }
     }
 
-    /**
-     * Keeps the lobby status aligned with the configured capacity.
-     *
-     * @param match match whose lobby status may change
-     */
     private void refreshLobbyStatus(MatchEntity match) {
         if (match.getStatus() == MatchStatus.IN_PROGRESS || match.getStatus() == MatchStatus.FINISHED) {
             return;
@@ -418,17 +510,12 @@ public class MatchServiceImpl implements MatchService {
                 : MatchStatus.WAITING);
     }
 
-    /**
-     * Applies a direct status patch while preserving required side effects.
-     *
-     * @param match match being patched
-     * @param status requested status
-     */
     private void applyMatchStatus(MatchEntity match, MatchStatus status) {
         if (status == MatchStatus.IN_PROGRESS) {
             validateMatchStartable(match);
             if (match.getRounds().isEmpty()) {
                 match.setCurrentRoundNumber(1);
+                match.setCurrentTurnPlayerId(match.getPlayers().get(0).getId());
                 match.getRounds().add(createRound(match, 1));
             }
         }
@@ -438,12 +525,6 @@ public class MatchServiceImpl implements MatchService {
         match.setStatus(status);
     }
 
-    /**
-     * Ensures that a player can join the selected match.
-     *
-     * @param match match being joined
-     * @param player player attempting to join
-     */
     private void validateMatchJoinable(MatchEntity match, PlayerEntity player) {
         if (match.getStatus() != MatchStatus.WAITING && match.getStatus() != MatchStatus.READY) {
             throw new BadRequestException("Only waiting or ready matches can be joined");
@@ -456,11 +537,6 @@ public class MatchServiceImpl implements MatchService {
         }
     }
 
-    /**
-     * Ensures that a match has enough players and is not already running.
-     *
-     * @param match match that should be started
-     */
     private void validateMatchStartable(MatchEntity match) {
         if (match.getStatus() == MatchStatus.IN_PROGRESS || match.getStatus() == MatchStatus.FINISHED) {
             throw new BadRequestException("Match cannot be started from status " + match.getStatus());
@@ -470,30 +546,28 @@ public class MatchServiceImpl implements MatchService {
         }
     }
 
-    /**
-     * Creates a new round and attaches it to a match.
-     *
-     * @param match parent match
-     * @param roundNumber round number
-     * @return created round entity
-     */
     private RoundEntity createRound(MatchEntity match, int roundNumber) {
         RoundEntity round = new RoundEntity();
         round.setId(UUID.randomUUID().toString());
         round.setRoundNumber(roundNumber);
         round.setStatus(RoundStatus.INITIALIZED);
-        round.setDice(new ArrayList<>());
-        round.setLocked(new ArrayList<>());
         round.setMatch(match);
+        
+        List<PlayerRoundStateEntity> states = new ArrayList<>();
+        for (PlayerEntity player : match.getPlayers()) {
+            PlayerRoundStateEntity state = new PlayerRoundStateEntity();
+            state.setId(UUID.randomUUID().toString());
+            state.setPlayer(player);
+            state.setRound(round);
+            state.setDice(new ArrayList<>());
+            state.setLocked(new ArrayList<>());
+            state.setRollsCount(0);
+            states.add(state);
+        }
+        round.setPlayerStates(states);
         return round;
     }
 
-    /**
-     * Ensures that the player belongs to the selected match.
-     *
-     * @param match match containing the allowed players
-     * @param playerId player identifier
-     */
     private void validatePlayerInMatch(MatchEntity match, String playerId) {
         boolean found = match.getPlayers().stream()
                 .anyMatch(player -> player.getId().equals(playerId));
@@ -502,11 +576,6 @@ public class MatchServiceImpl implements MatchService {
         }
     }
 
-    /**
-     * Ensures that the round is still active and belongs to an in-progress match.
-     *
-     * @param round round that should be played
-     */
     private void validateRoundCanBePlayed(RoundEntity round) {
         if (round.getMatch().getStatus() != MatchStatus.IN_PROGRESS) {
             throw new BadRequestException("Match is not in progress");
@@ -516,35 +585,6 @@ public class MatchServiceImpl implements MatchService {
         }
     }
 
-    /**
-     * Builds a five-dice roll while preserving locked dice values.
-     *
-     * @param round current round
-     * @return list of dice faces after rolling
-     */
-    private List<DiceFace> buildRolledDice(RoundEntity round) {
-        List<DiceFace> currentDice = new ArrayList<>(round.getDice());
-        List<Boolean> locked = ensureLockList(round.getLocked());
-        List<DiceFace> diceFaces = Arrays.asList(DiceFace.values());
-        List<DiceFace> rolledDice = new ArrayList<>();
-
-        for (int i = 0; i < DICE_COUNT; i++) {
-            if (i < currentDice.size() && Boolean.TRUE.equals(locked.get(i))) {
-                rolledDice.add(currentDice.get(i));
-            } else {
-                rolledDice.add(diceFaces.get(random.nextInt(diceFaces.size())));
-            }
-        }
-
-        return rolledDice;
-    }
-
-    /**
-     * Normalizes the lock list so that it always contains one value for each die.
-     *
-     * @param locked current lock list
-     * @return normalized lock list
-     */
     private List<Boolean> ensureLockList(List<Boolean> locked) {
         List<Boolean> normalized = new ArrayList<>();
         for (int i = 0; i < DICE_COUNT; i++) {
@@ -553,49 +593,6 @@ public class MatchServiceImpl implements MatchService {
         return normalized;
     }
 
-    /**
-     * Validates a directly supplied dice list for round update endpoints.
-     *
-     * @param dice dice values from the request
-     * @return copied dice values
-     */
-    private List<DiceFace> validateDice(List<DiceFace> dice) {
-        if (dice.size() > DICE_COUNT) {
-            throw new BadRequestException("A round cannot contain more than " + DICE_COUNT + " dice");
-        }
-        return new ArrayList<>(dice);
-    }
-
-    /**
-     * Validates a directly supplied lock list for round update endpoints.
-     *
-     * @param locked locked dice values from the request
-     * @return copied lock values
-     */
-    private List<Boolean> validateLockedDice(List<Boolean> locked) {
-        if (locked.size() != DICE_COUNT) {
-            throw new BadRequestException("Locked dice list must contain exactly " + DICE_COUNT + " values");
-        }
-        return new ArrayList<>(locked);
-    }
-
-    /**
-     * Ensures that dice exist before lock, resolve or ability operations.
-     *
-     * @param round selected round
-     */
-    private void validateDiceAlreadyRolled(RoundEntity round) {
-        if (round.getDice() == null || round.getDice().isEmpty()) {
-            throw new BadRequestException("Dice must be rolled first");
-        }
-    }
-
-    /**
-     * Locks a valid dice index and rejects invalid positions.
-     *
-     * @param locked current lock list
-     * @param index index requested by the player
-     */
     private void lockIndex(List<Boolean> locked, Integer index) {
         if (index == null || index < 0 || index >= DICE_COUNT) {
             throw new BadRequestException("Locked dice index must be between 0 and " + (DICE_COUNT - 1));
@@ -603,37 +600,12 @@ public class MatchServiceImpl implements MatchService {
         locked.set(index, true);
     }
 
-    /**
-     * Applies a small token reward based on attack dice rolled during the round.
-     *
-     * @param round resolved round
-     */
-    private void rewardPlayers(RoundEntity round) {
-        long attackDice = round.getDice().stream()
-                .filter(face -> face == DiceFace.ATTACK)
-                .count();
-
-        round.getMatch().getPlayers()
-                .forEach(player -> player.setTokens(player.getTokens() + Math.toIntExact(attackDice)));
-    }
-
-    /**
-     * Creates the next initialized round after resolving the current one.
-     *
-     * @param match match receiving the next round
-     * @param nextRoundNumber next round number
-     */
     private void createNextRound(MatchEntity match, int nextRoundNumber) {
         match.setCurrentRoundNumber(nextRoundNumber);
         RoundEntity nextRound = createRound(match, nextRoundNumber);
         match.getRounds().add(nextRound);
     }
 
-    /**
-     * Finishes a match and updates the basic win/loss counters.
-     *
-     * @param match match to finish
-     */
     private void finishMatch(MatchEntity match) {
         match.setStatus(MatchStatus.FINISHED);
         if (match.getPlayers().isEmpty()) {
@@ -641,7 +613,8 @@ public class MatchServiceImpl implements MatchService {
         }
 
         PlayerEntity winner = match.getPlayers().stream()
-                .max((left, right) -> left.getTokens().compareTo(right.getTokens()))
+                .filter(p -> p.getHearts() > 0)
+                .findFirst()
                 .orElse(match.getPlayers().get(0));
 
         match.getPlayers().forEach(player -> {
@@ -653,13 +626,6 @@ public class MatchServiceImpl implements MatchService {
         });
     }
 
-    /**
-     * Ensures that a player has enough tokens to activate an ability in a valid round.
-     *
-     * @param round selected round
-     * @param player player activating the ability
-     * @param ability selected ability
-     */
     private void validateAbilityCanBeActivated(RoundEntity round, PlayerEntity player, AbilityEntity ability) {
         if (round.getMatch().getStatus() != MatchStatus.IN_PROGRESS) {
             throw new BadRequestException("Abilities can be activated only during an active match");
@@ -672,12 +638,6 @@ public class MatchServiceImpl implements MatchService {
         }
     }
 
-    /**
-     * Builds a plain text replay from the persisted match and round data.
-     *
-     * @param match match to export
-     * @return replay content
-     */
     private String buildReplay(MatchEntity match) {
         StringBuilder replay = new StringBuilder();
         replay.append("Dice Duel Replay\n");
@@ -697,16 +657,12 @@ public class MatchServiceImpl implements MatchService {
 
         replay.append("Rounds:\n");
         match.getRounds().stream()
-                .sorted((left, right) -> left.getRoundNumber().compareTo(right.getRoundNumber()))
+                .sorted(Comparator.comparing(RoundEntity::getRoundNumber))
                 .forEach(round -> replay
                         .append("- Round ")
                         .append(round.getRoundNumber())
                         .append(" status=")
                         .append(round.getStatus())
-                        .append(" dice=")
-                        .append(round.getDice())
-                        .append(" locked=")
-                        .append(round.getLocked())
                         .append('\n'));
 
         return replay.toString();

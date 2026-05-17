@@ -2,6 +2,9 @@ package com.diceduel.entity;
 
 public enum DiceFace {
     ATTACK,
+    ATTACK_GOLD,
     SHIELD,
-    STEAL
+    SHIELD_GOLD,
+    STEAL,
+    STEAL_GOLD
 }

@@ -29,6 +29,7 @@ public class MatchMapper {
     public MatchStateResponse toStateResponse(MatchEntity match) {
         return new MatchStateResponse(
                 match.getCurrentRoundNumber(),
+                match.getCurrentTurnPlayerId(),
                 toPlayerResponses(match.getPlayers())
         );
     }

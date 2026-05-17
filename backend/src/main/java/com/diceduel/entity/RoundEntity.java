@@ -1,13 +1,6 @@
 package com.diceduel.entity;
 
-import jakarta.persistence.ElementCollection;
-import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,12 +17,8 @@ public class RoundEntity {
     @Enumerated(EnumType.STRING)
     private RoundStatus status;
 
-    @ElementCollection
-    @Enumerated(EnumType.STRING)
-    private List<DiceFace> dice = new ArrayList<>();
-
-    @ElementCollection
-    private List<Boolean> locked = new ArrayList<>();
+    @OneToMany(mappedBy = "round", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<PlayerRoundStateEntity> playerStates = new ArrayList<>();
 
     @ManyToOne
     @JoinColumn(name = "match_id", nullable = false)
@@ -62,20 +51,12 @@ public class RoundEntity {
         this.status = status;
     }
 
-    public List<DiceFace> getDice() {
-        return dice;
+    public List<PlayerRoundStateEntity> getPlayerStates() {
+        return playerStates;
     }
 
-    public void setDice(List<DiceFace> dice) {
-        this.dice = dice;
-    }
-
-    public List<Boolean> getLocked() {
-        return locked;
-    }
-
-    public void setLocked(List<Boolean> locked) {
-        this.locked = locked;
+    public void setPlayerStates(List<PlayerRoundStateEntity> playerStates) {
+        this.playerStates = playerStates;
     }
 
     public MatchEntity getMatch() {
