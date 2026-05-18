@@ -263,6 +263,11 @@ Feature: DiceDuel API - Full REST Operations Test Suite
     Then status 200
     And match response contains matchId
 
+    Given path '/api/matches', matchId, 'rounds', roundId
+    And request { playerStates: [{ playerId: '#(hostId)', dice: ['SHIELD', 'SHIELD', 'SHIELD', 'SHIELD', 'SHIELD'], locked: [true, true, true, true, true], targetPlayerIds: ['', '', '', '', ''] }, { playerId: '#(guestId)', dice: [], locked: [false, false, false, false, false], targetPlayerIds: ['', '', '', '', ''] }] }
+    When method PATCH
+    Then status 200
+
     Given path '/api/matches', matchId, 'rounds', roundId, 'resolve'
     When method POST
     Then status 200

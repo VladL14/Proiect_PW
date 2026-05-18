@@ -419,6 +419,22 @@ class ApiFlowIntegrationTests {
                         .content("{\"locked\":[true]}"))
                 .andExpect(status().isBadRequest());
 
+        mockMvc.perform(patch("/api/matches/{matchId}/rounds/{roundId}", startedRound.matchId(), startedRound.roundId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "playerStates": [
+                                    {
+                                      "playerId": "%s",
+                                      "dice": ["SHIELD", "SHIELD", "SHIELD", "SHIELD", "SHIELD"],
+                                      "locked": [true, true, true, true, true],
+                                      "targetPlayerIds": ["", "", "", "", ""]
+                                    }
+                                  ]
+                                }
+                                """.formatted(startedRound.hostId())))
+                .andExpect(status().isOk());
+
         mockMvc.perform(post("/api/matches/{matchId}/rounds/{roundId}/resolve", startedRound.matchId(), startedRound.roundId()))
                 .andExpect(status().isOk());
 

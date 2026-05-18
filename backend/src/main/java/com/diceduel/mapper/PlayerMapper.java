@@ -13,7 +13,8 @@ public class PlayerMapper {
                 player.getId(),
                 player.getName(),
                 player.getHearts(),
-                player.getTokens()
+                player.getTokens(),
+                player.getHearts() <= 0
         );
     }
 

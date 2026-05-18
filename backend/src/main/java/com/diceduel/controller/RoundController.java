@@ -1,9 +1,11 @@
 package com.diceduel.controller;
 
 import com.diceduel.dto.LockDiceRequest;
+import com.diceduel.dto.MatchStateResponse;
 import com.diceduel.dto.PatchRoundRequest;
 import com.diceduel.dto.RollDiceRequest;
 import com.diceduel.dto.RoundResponse;
+import com.diceduel.dto.SetDiceTargetsRequest;
 import com.diceduel.dto.UpdateLockedDiceRequest;
 import com.diceduel.dto.UpdateRoundRequest;
 import com.diceduel.service.MatchService;
@@ -72,23 +74,21 @@ public class RoundController {
     }
 
     @PostMapping("/{roundId}/roll")
-    public ResponseEntity<Void> rollDice(
+    public ResponseEntity<RoundResponse> rollDice(
             @PathVariable String matchId,
             @PathVariable String roundId,
             @Valid @RequestBody RollDiceRequest request
     ) {
-        matchService.rollDice(matchId, roundId, request);
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(matchService.rollDice(matchId, roundId, request));
     }
 
     @PostMapping("/{roundId}/lock")
-    public ResponseEntity<Void> lockDice(
+    public ResponseEntity<RoundResponse> lockDice(
             @PathVariable String matchId,
             @PathVariable String roundId,
             @Valid @RequestBody LockDiceRequest request
     ) {
-        matchService.lockDice(matchId, roundId, request);
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(matchService.lockDice(matchId, roundId, request));
     }
 
     @PatchMapping("/{roundId}/locked-dice")
@@ -100,12 +100,20 @@ public class RoundController {
         return ResponseEntity.ok(matchService.updateLockedDice(matchId, roundId, request));
     }
 
+    @PostMapping("/{roundId}/target")
+    public ResponseEntity<RoundResponse> setDiceTargets(
+            @PathVariable String matchId,
+            @PathVariable String roundId,
+            @Valid @RequestBody SetDiceTargetsRequest request
+    ) {
+        return ResponseEntity.ok(matchService.setDiceTargets(matchId, roundId, request));
+    }
+
     @PostMapping("/{roundId}/resolve")
-    public ResponseEntity<Void> resolveRound(
+    public ResponseEntity<MatchStateResponse> resolveRound(
             @PathVariable String matchId,
             @PathVariable String roundId
     ) {
-        matchService.resolveRound(matchId, roundId);
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(matchService.resolveRound(matchId, roundId));
     }
 }

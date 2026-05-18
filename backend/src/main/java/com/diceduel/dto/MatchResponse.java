@@ -7,6 +7,7 @@ import java.util.List;
 public record MatchResponse(
         String id,
         MatchStatus status,
-        List<PlayerResponse> players
+        List<PlayerResponse> players,
+        String winnerPlayerId
 ) {
 }

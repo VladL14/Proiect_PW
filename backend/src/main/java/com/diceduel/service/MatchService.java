@@ -10,6 +10,7 @@ import com.diceduel.dto.PatchMatchRequest;
 import com.diceduel.dto.PatchRoundRequest;
 import com.diceduel.dto.RollDiceRequest;
 import com.diceduel.dto.RoundResponse;
+import com.diceduel.dto.SetDiceTargetsRequest;
 import com.diceduel.dto.UpdateLockedDiceRequest;
 import com.diceduel.dto.UpdateMatchRequest;
 import com.diceduel.dto.UpdateMatchStatusRequest;
@@ -105,7 +106,7 @@ public interface MatchService {
      * @param roundId round identifier
      * @param request roll request
      */
-    void rollDice(String matchId, String roundId, RollDiceRequest request);
+    RoundResponse rollDice(String matchId, String roundId, RollDiceRequest request);
 
     /**
      * Locks selected dice indexes for the selected round.
@@ -114,9 +115,11 @@ public interface MatchService {
      * @param roundId round identifier
      * @param request lock request
      */
-    void lockDice(String matchId, String roundId, LockDiceRequest request);
+    RoundResponse lockDice(String matchId, String roundId, LockDiceRequest request);
 
     RoundResponse updateLockedDice(String matchId, String roundId, UpdateLockedDiceRequest request);
+
+    RoundResponse setDiceTargets(String matchId, String roundId, SetDiceTargetsRequest request);
 
     /**
      * Resolves a round and either creates the next round or finishes the match.
@@ -124,7 +127,7 @@ public interface MatchService {
      * @param matchId match identifier
      * @param roundId round identifier
      */
-    void resolveRound(String matchId, String roundId);
+    MatchStateResponse resolveRound(String matchId, String roundId);
 
     /**
      * Activates an ability during the ability phase.

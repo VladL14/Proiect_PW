@@ -9,7 +9,9 @@ import com.diceduel.dto.MatchStateResponse;
 import com.diceduel.dto.PatchMatchRequest;
 import com.diceduel.dto.PatchRoundRequest;
 import com.diceduel.dto.RollDiceRequest;
+import com.diceduel.dto.RoundPlayerStateRequest;
 import com.diceduel.dto.RoundResponse;
+import com.diceduel.dto.SetDiceTargetsRequest;
 import com.diceduel.dto.UpdateLockedDiceRequest;
 import com.diceduel.dto.UpdateMatchRequest;
 import com.diceduel.dto.UpdateMatchStatusRequest;
@@ -20,6 +22,7 @@ import com.diceduel.entity.MatchEntity;
 import com.diceduel.entity.MatchStatus;
 import com.diceduel.entity.PlayerEntity;
 import com.diceduel.entity.RoundEntity;
+import com.diceduel.entity.RoundPlayerStateEntity;
 import com.diceduel.entity.RoundStatus;
 import com.diceduel.exception.BadRequestException;
 import com.diceduel.exception.ResourceNotFoundException;
@@ -39,7 +42,10 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 
@@ -49,7 +55,6 @@ public class MatchServiceImpl implements MatchService {
 
     private static final int DEFAULT_MAX_PLAYERS = 2;
     private static final int DICE_COUNT = 5;
-    private static final int MAX_ROUNDS = 3;
 
     private final MatchRepository matchRepository;
     private final PlayerRepository playerRepository;
@@ -84,6 +89,7 @@ public class MatchServiceImpl implements MatchService {
         match.setStatus(MatchStatus.WAITING);
         match.setMaxPlayers(resolveMaxPlayers(request.maxPlayers()));
         match.setCurrentRoundNumber(0);
+        match.setWinnerPlayerId(null);
         match.setCreatedAt(LocalDateTime.now());
         match.getPlayers().add(host);
 
@@ -178,6 +184,7 @@ public class MatchServiceImpl implements MatchService {
         validateMatchStartable(match);
 
         match.setStatus(MatchStatus.IN_PROGRESS);
+        match.setWinnerPlayerId(null);
         match.setCurrentRoundNumber(1);
         RoundEntity round = createRound(match, 1);
         match.getRounds().add(round);
@@ -220,6 +227,9 @@ public class MatchServiceImpl implements MatchService {
         round.setStatus(request.status());
         round.setDice(validateDice(request.dice()));
         round.setLocked(validateLockedDice(request.locked()));
+        if (request.playerStates() != null) {
+            replacePlayerStates(round, request.playerStates());
+        }
         return roundMapper.toResponse(roundRepository.save(round));
     }
 
@@ -235,6 +245,9 @@ public class MatchServiceImpl implements MatchService {
         }
         if (request.locked() != null) {
             round.setLocked(validateLockedDice(request.locked()));
+        }
+        if (request.playerStates() != null) {
+            replacePlayerStates(round, request.playerStates());
         }
 
         return roundMapper.toResponse(roundRepository.save(round));
@@ -256,30 +269,41 @@ public class MatchServiceImpl implements MatchService {
     }
 
     @Override
-    public void rollDice(String matchId, String roundId, RollDiceRequest request) {
+    public RoundResponse rollDice(String matchId, String roundId, RollDiceRequest request) {
         RoundEntity round = findRoundEntity(matchId, roundId);
-        validatePlayerInMatch(round.getMatch(), request.playerId());
+        PlayerEntity player = validatePlayerInMatch(round.getMatch(), request.playerId());
+        validatePlayerAlive(player);
         validateRoundCanBePlayed(round);
 
-        List<DiceFace> dice = buildRolledDice(round);
-        round.setDice(dice);
-        round.setLocked(ensureLockList(round.getLocked()));
+        RoundPlayerStateEntity playerState = findOrCreatePlayerState(round, player);
+        List<DiceFace> dice = buildRolledDice(playerState);
+        playerState.setDice(dice);
+        playerState.setLocked(ensureLockList(playerState.getLocked()));
+        playerState.setTargetPlayerIds(targetsAfterRoll(playerState.getTargetPlayerIds(), dice));
+        playerState.setRollsCount(playerState.getRollsCount() + 1);
+        mirrorLegacyRoundDice(round, playerState);
         round.setStatus(RoundStatus.ROLLING);
-        roundRepository.save(round);
+        round.setRoundSummary(player.getName() + " rolled the dice.");
+        round.getActionLogs().add(player.getName() + " rolled " + dice.size() + " dice.");
+        return roundMapper.toResponse(roundRepository.save(round));
     }
 
     @Override
-    public void lockDice(String matchId, String roundId, LockDiceRequest request) {
+    public RoundResponse lockDice(String matchId, String roundId, LockDiceRequest request) {
         RoundEntity round = findRoundEntity(matchId, roundId);
-        validatePlayerInMatch(round.getMatch(), request.playerId());
-        validateDiceAlreadyRolled(round);
+        PlayerEntity player = validatePlayerInMatch(round.getMatch(), request.playerId());
+        validatePlayerAlive(player);
+        RoundPlayerStateEntity playerState = findRequiredPlayerState(round, request.playerId());
+        validateDiceAlreadyRolled(playerState);
 
-        List<Boolean> locked = new ArrayList<>(ensureLockList(round.getLocked()));
+        List<Boolean> locked = emptyLockList();
         request.lockedIndexes().forEach(index -> lockIndex(locked, index));
 
-        round.setLocked(locked);
+        playerState.setLocked(locked);
+        mirrorLegacyRoundDice(round, playerState);
         round.setStatus(RoundStatus.TARGET_SELECTION);
-        roundRepository.save(round);
+        round.setRoundSummary(player.getName() + " locked " + request.lockedIndexes().size() + " dice.");
+        return roundMapper.toResponse(roundRepository.save(round));
     }
 
     @Override
@@ -292,25 +316,69 @@ public class MatchServiceImpl implements MatchService {
     }
 
     @Override
-    public void resolveRound(String matchId, String roundId) {
+    public RoundResponse setDiceTargets(String matchId, String roundId, SetDiceTargetsRequest request) {
         RoundEntity round = findRoundEntity(matchId, roundId);
-        validateDiceAlreadyRolled(round);
+        PlayerEntity player = validatePlayerInMatch(round.getMatch(), request.playerId());
+        validatePlayerAlive(player);
+        RoundPlayerStateEntity playerState = findRequiredPlayerState(round, request.playerId());
+        validateDiceAlreadyRolled(playerState);
+
+        List<String> targetPlayerIds = new ArrayList<>(ensureTargetList(playerState.getTargetPlayerIds()));
+        for (Map.Entry<Integer, String> entry : request.diceTargets().entrySet()) {
+            int dieIndex = validateDieIndex(entry.getKey());
+            DiceFace face = playerState.getDice().get(dieIndex);
+            if (face == DiceFace.SHIELD) {
+                throw new BadRequestException("Shield dice do not take targets");
+            }
+            if (face != DiceFace.ATTACK && face != DiceFace.STEAL) {
+                throw new BadRequestException("Only attack and steal dice can target players");
+            }
+            if (entry.getValue() == null || entry.getValue().isBlank()) {
+                targetPlayerIds.set(dieIndex, "");
+                continue;
+            }
+            validateTarget(round.getMatch(), request.playerId(), entry.getValue());
+            targetPlayerIds.set(dieIndex, entry.getValue());
+        }
+
+        for (int i = 0; i < playerState.getDice().size(); i++) {
+            if (playerState.getDice().get(i) == DiceFace.SHIELD) {
+                targetPlayerIds.set(i, "");
+            }
+        }
+
+        playerState.setTargetPlayerIds(targetPlayerIds);
+        round.setStatus(RoundStatus.TARGET_SELECTION);
+        round.setRoundSummary(player.getName() + " chose targets.");
+        return roundMapper.toResponse(roundRepository.save(round));
+    }
+
+    @Override
+    public MatchStateResponse resolveRound(String matchId, String roundId) {
+        RoundEntity round = findRoundEntity(matchId, roundId);
+        validateAnyDiceRolled(round);
 
         if (round.getStatus() == RoundStatus.RESOLVED) {
             throw new BadRequestException("Round is already resolved");
         }
 
-        rewardPlayers(round);
+        List<String> actionLogs = resolveRoundCombat(round);
+        round.setActionLogs(actionLogs);
+        round.setRoundSummary(buildRoundSummary(actionLogs));
         round.setStatus(RoundStatus.RESOLVED);
 
         MatchEntity match = round.getMatch();
-        if (round.getRoundNumber() >= MAX_ROUNDS) {
-            finishMatch(match);
+        Optional<PlayerEntity> winner = determineWinner(match);
+        if (winner.isPresent()) {
+            finishMatch(match, winner.get());
+            actionLogs.add("The match ended. " + winner.get().getName() + " won the duel.");
+            round.setActionLogs(actionLogs);
+            round.setRoundSummary(buildRoundSummary(actionLogs));
         } else {
             createNextRound(match, round.getRoundNumber() + 1);
         }
 
-        matchRepository.save(match);
+        return matchMapper.toStateResponse(matchRepository.save(match));
     }
 
     @Override
@@ -485,6 +553,12 @@ public class MatchServiceImpl implements MatchService {
         round.setDice(new ArrayList<>());
         round.setLocked(new ArrayList<>());
         round.setMatch(match);
+        for (int i = 0; i < match.getPlayers().size(); i++) {
+            PlayerEntity player = match.getPlayers().get(i);
+            if (player.getHearts() > 0) {
+                round.getPlayerStates().add(createPlayerState(round, player, i));
+            }
+        }
         return round;
     }
 
@@ -493,12 +567,18 @@ public class MatchServiceImpl implements MatchService {
      *
      * @param match match containing the allowed players
      * @param playerId player identifier
+     * @return player in the match
      */
-    private void validatePlayerInMatch(MatchEntity match, String playerId) {
-        boolean found = match.getPlayers().stream()
-                .anyMatch(player -> player.getId().equals(playerId));
-        if (!found) {
-            throw new BadRequestException("Player is not part of this match");
+    private PlayerEntity validatePlayerInMatch(MatchEntity match, String playerId) {
+        return match.getPlayers().stream()
+                .filter(player -> player.getId().equals(playerId))
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException("Player is not part of this match"));
+    }
+
+    private void validatePlayerAlive(PlayerEntity player) {
+        if (player.getHearts() <= 0) {
+            throw new BadRequestException("Eliminated players cannot take actions");
         }
     }
 
@@ -519,12 +599,12 @@ public class MatchServiceImpl implements MatchService {
     /**
      * Builds a five-dice roll while preserving locked dice values.
      *
-     * @param round current round
+     * @param playerState current player state
      * @return list of dice faces after rolling
      */
-    private List<DiceFace> buildRolledDice(RoundEntity round) {
-        List<DiceFace> currentDice = new ArrayList<>(round.getDice());
-        List<Boolean> locked = ensureLockList(round.getLocked());
+    private List<DiceFace> buildRolledDice(RoundPlayerStateEntity playerState) {
+        List<DiceFace> currentDice = new ArrayList<>(playerState.getDice());
+        List<Boolean> locked = ensureLockList(playerState.getLocked());
         List<DiceFace> diceFaces = Arrays.asList(DiceFace.values());
         List<DiceFace> rolledDice = new ArrayList<>();
 
@@ -553,6 +633,76 @@ public class MatchServiceImpl implements MatchService {
         return normalized;
     }
 
+    private List<Boolean> emptyLockList() {
+        List<Boolean> locked = new ArrayList<>();
+        for (int i = 0; i < DICE_COUNT; i++) {
+            locked.add(false);
+        }
+        return locked;
+    }
+
+    private List<String> ensureTargetList(List<String> targets) {
+        List<String> normalized = new ArrayList<>();
+        for (int i = 0; i < DICE_COUNT; i++) {
+            normalized.add(targets != null && i < targets.size() && targets.get(i) != null
+                    ? targets.get(i)
+                    : "");
+        }
+        return normalized;
+    }
+
+    private List<String> targetsAfterRoll(List<String> currentTargets, List<DiceFace> dice) {
+        List<String> targets = ensureTargetList(currentTargets);
+        for (int i = 0; i < DICE_COUNT; i++) {
+            if (i >= dice.size() || (dice.get(i) != DiceFace.ATTACK && dice.get(i) != DiceFace.STEAL)) {
+                targets.set(i, "");
+            }
+        }
+        return targets;
+    }
+
+    private RoundPlayerStateEntity createPlayerState(RoundEntity round, PlayerEntity player, int turnOrder) {
+        RoundPlayerStateEntity playerState = new RoundPlayerStateEntity();
+        playerState.setId(UUID.randomUUID().toString());
+        playerState.setPlayerId(player.getId());
+        playerState.setRollsCount(0);
+        playerState.setTurnOrder(turnOrder);
+        playerState.setDice(new ArrayList<>());
+        playerState.setLocked(emptyLockList());
+        playerState.setTargetPlayerIds(ensureTargetList(null));
+        playerState.setRound(round);
+        return playerState;
+    }
+
+    private RoundPlayerStateEntity findOrCreatePlayerState(RoundEntity round, PlayerEntity player) {
+        return round.getPlayerStates()
+                .stream()
+                .filter(state -> state.getPlayerId().equals(player.getId()))
+                .findFirst()
+                .orElseGet(() -> {
+                    RoundPlayerStateEntity playerState = createPlayerState(
+                            round,
+                            player,
+                            round.getPlayerStates().size()
+                    );
+                    round.getPlayerStates().add(playerState);
+                    return playerState;
+                });
+    }
+
+    private RoundPlayerStateEntity findRequiredPlayerState(RoundEntity round, String playerId) {
+        return round.getPlayerStates()
+                .stream()
+                .filter(state -> state.getPlayerId().equals(playerId))
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException("Player has no dice state in this round"));
+    }
+
+    private void mirrorLegacyRoundDice(RoundEntity round, RoundPlayerStateEntity playerState) {
+        round.setDice(new ArrayList<>(playerState.getDice()));
+        round.setLocked(new ArrayList<>(playerState.getLocked()));
+    }
+
     /**
      * Validates a directly supplied dice list for round update endpoints.
      *
@@ -560,6 +710,9 @@ public class MatchServiceImpl implements MatchService {
      * @return copied dice values
      */
     private List<DiceFace> validateDice(List<DiceFace> dice) {
+        if (dice == null) {
+            return new ArrayList<>();
+        }
         if (dice.size() > DICE_COUNT) {
             throw new BadRequestException("A round cannot contain more than " + DICE_COUNT + " dice");
         }
@@ -573,10 +726,51 @@ public class MatchServiceImpl implements MatchService {
      * @return copied lock values
      */
     private List<Boolean> validateLockedDice(List<Boolean> locked) {
+        if (locked == null) {
+            return emptyLockList();
+        }
         if (locked.size() != DICE_COUNT) {
             throw new BadRequestException("Locked dice list must contain exactly " + DICE_COUNT + " values");
         }
         return new ArrayList<>(locked);
+    }
+
+    private void replacePlayerStates(RoundEntity round, List<RoundPlayerStateRequest> requests) {
+        round.getPlayerStates().clear();
+        for (int i = 0; i < requests.size(); i++) {
+            RoundPlayerStateRequest request = requests.get(i);
+            PlayerEntity player = validatePlayerInMatch(round.getMatch(), request.playerId());
+            RoundPlayerStateEntity playerState = createPlayerState(round, player, i);
+            List<DiceFace> dice = validateDice(request.dice());
+            playerState.setDice(dice);
+            playerState.setLocked(request.locked() == null ? emptyLockList() : validateLockedDice(request.locked()));
+            playerState.setTargetPlayerIds(validateTargetsForDice(round.getMatch(), request.playerId(), dice, request.targetPlayerIds()));
+            round.getPlayerStates().add(playerState);
+            if (i == 0) {
+                mirrorLegacyRoundDice(round, playerState);
+            }
+        }
+    }
+
+    private List<String> validateTargetsForDice(
+            MatchEntity match,
+            String playerId,
+            List<DiceFace> dice,
+            List<String> targetPlayerIds
+    ) {
+        List<String> targets = ensureTargetList(targetPlayerIds);
+        for (int i = 0; i < dice.size(); i++) {
+            DiceFace face = dice.get(i);
+            String targetPlayerId = targets.get(i);
+            if (face == DiceFace.SHIELD) {
+                targets.set(i, "");
+                continue;
+            }
+            if ((face == DiceFace.ATTACK || face == DiceFace.STEAL) && targetPlayerId != null && !targetPlayerId.isBlank()) {
+                validateTarget(match, playerId, targetPlayerId);
+            }
+        }
+        return targets;
     }
 
     /**
@@ -586,6 +780,21 @@ public class MatchServiceImpl implements MatchService {
      */
     private void validateDiceAlreadyRolled(RoundEntity round) {
         if (round.getDice() == null || round.getDice().isEmpty()) {
+            throw new BadRequestException("Dice must be rolled first");
+        }
+    }
+
+    private void validateDiceAlreadyRolled(RoundPlayerStateEntity playerState) {
+        if (playerState.getDice() == null || playerState.getDice().isEmpty()) {
+            throw new BadRequestException("Dice must be rolled first");
+        }
+    }
+
+    private void validateAnyDiceRolled(RoundEntity round) {
+        boolean hasRolledDice = round.getPlayerStates()
+                .stream()
+                .anyMatch(state -> state.getDice() != null && !state.getDice().isEmpty());
+        if (!hasRolledDice && (round.getDice() == null || round.getDice().isEmpty())) {
             throw new BadRequestException("Dice must be rolled first");
         }
     }
@@ -603,18 +812,170 @@ public class MatchServiceImpl implements MatchService {
         locked.set(index, true);
     }
 
-    /**
-     * Applies a small token reward based on attack dice rolled during the round.
-     *
-     * @param round resolved round
-     */
-    private void rewardPlayers(RoundEntity round) {
-        long attackDice = round.getDice().stream()
-                .filter(face -> face == DiceFace.ATTACK)
-                .count();
+    private int validateDieIndex(Integer index) {
+        if (index == null || index < 0 || index >= DICE_COUNT) {
+            throw new BadRequestException("Dice index must be between 0 and " + (DICE_COUNT - 1));
+        }
+        return index;
+    }
 
-        round.getMatch().getPlayers()
-                .forEach(player -> player.setTokens(player.getTokens() + Math.toIntExact(attackDice)));
+    private PlayerEntity validateTarget(MatchEntity match, String actingPlayerId, String targetPlayerId) {
+        if (targetPlayerId == null || targetPlayerId.isBlank()) {
+            throw new BadRequestException("Target player is required");
+        }
+        if (actingPlayerId.equals(targetPlayerId)) {
+            throw new BadRequestException("A player cannot target themselves");
+        }
+        PlayerEntity target = validatePlayerInMatch(match, targetPlayerId);
+        if (target.getHearts() <= 0) {
+            throw new BadRequestException("Eliminated players cannot be targeted");
+        }
+        return target;
+    }
+
+    private List<String> resolveRoundCombat(RoundEntity round) {
+        MatchEntity match = round.getMatch();
+        Map<String, PlayerEntity> playersById = new LinkedHashMap<>();
+        match.getPlayers().forEach(player -> playersById.put(player.getId(), player));
+
+        validateRequiredTargets(round);
+
+        Map<String, Map<String, Integer>> attacksByTargetAndAttacker = new LinkedHashMap<>();
+        Map<String, Integer> shieldsByPlayer = new LinkedHashMap<>();
+        Map<String, Map<String, Integer>> stealsByTargetAndAttacker = new LinkedHashMap<>();
+
+        for (RoundPlayerStateEntity playerState : sortedPlayerStates(round)) {
+            PlayerEntity actingPlayer = playersById.get(playerState.getPlayerId());
+            if (actingPlayer == null || actingPlayer.getHearts() <= 0) {
+                continue;
+            }
+            List<String> targets = ensureTargetList(playerState.getTargetPlayerIds());
+            for (int i = 0; i < playerState.getDice().size(); i++) {
+                DiceFace face = playerState.getDice().get(i);
+                if (face == DiceFace.SHIELD) {
+                    shieldsByPlayer.merge(playerState.getPlayerId(), 1, Integer::sum);
+                } else if (face == DiceFace.ATTACK) {
+                    addTargetedAction(attacksByTargetAndAttacker, targets.get(i), playerState.getPlayerId());
+                } else if (face == DiceFace.STEAL) {
+                    addTargetedAction(stealsByTargetAndAttacker, targets.get(i), playerState.getPlayerId());
+                }
+            }
+        }
+
+        List<String> logs = new ArrayList<>();
+        resolveAttacks(playersById, attacksByTargetAndAttacker, shieldsByPlayer, logs);
+        resolveSteals(playersById, stealsByTargetAndAttacker, logs);
+        resolveEliminations(match, logs);
+        return logs;
+    }
+
+    private void validateRequiredTargets(RoundEntity round) {
+        for (RoundPlayerStateEntity playerState : sortedPlayerStates(round)) {
+            PlayerEntity player = validatePlayerInMatch(round.getMatch(), playerState.getPlayerId());
+            if (player.getHearts() <= 0) {
+                continue;
+            }
+            List<String> targets = ensureTargetList(playerState.getTargetPlayerIds());
+            for (int i = 0; i < playerState.getDice().size(); i++) {
+                DiceFace face = playerState.getDice().get(i);
+                if (face == DiceFace.ATTACK || face == DiceFace.STEAL) {
+                    validateTarget(round.getMatch(), playerState.getPlayerId(), targets.get(i));
+                }
+            }
+        }
+    }
+
+    private List<RoundPlayerStateEntity> sortedPlayerStates(RoundEntity round) {
+        return round.getPlayerStates()
+                .stream()
+                .sorted(Comparator.comparing(RoundPlayerStateEntity::getTurnOrder))
+                .toList();
+    }
+
+    private void addTargetedAction(
+            Map<String, Map<String, Integer>> actionsByTargetAndAttacker,
+            String targetPlayerId,
+            String actingPlayerId
+    ) {
+        actionsByTargetAndAttacker
+                .computeIfAbsent(targetPlayerId, ignored -> new LinkedHashMap<>())
+                .merge(actingPlayerId, 1, Integer::sum);
+    }
+
+    private void resolveAttacks(
+            Map<String, PlayerEntity> playersById,
+            Map<String, Map<String, Integer>> attacksByTargetAndAttacker,
+            Map<String, Integer> shieldsByPlayer,
+            List<String> logs
+    ) {
+        attacksByTargetAndAttacker.forEach((targetPlayerId, attacksByAttacker) -> {
+            PlayerEntity target = playersById.get(targetPlayerId);
+            int shieldsRemaining = shieldsByPlayer.getOrDefault(targetPlayerId, 0);
+            int totalDamage = 0;
+
+            for (Map.Entry<String, Integer> entry : attacksByAttacker.entrySet()) {
+                PlayerEntity attacker = playersById.get(entry.getKey());
+                int attacks = entry.getValue();
+                int blocked = Math.min(attacks, shieldsRemaining);
+                int damage = attacks - blocked;
+                shieldsRemaining -= blocked;
+                totalDamage += damage;
+                logs.add(attacker.getName() + " attacked " + target.getName() + ". "
+                        + blocked + " attack(s) blocked, " + damage + " damage dealt.");
+            }
+
+            target.setHearts(Math.max(0, target.getHearts() - totalDamage));
+        });
+    }
+
+    private void resolveSteals(
+            Map<String, PlayerEntity> playersById,
+            Map<String, Map<String, Integer>> stealsByTargetAndAttacker,
+            List<String> logs
+    ) {
+        stealsByTargetAndAttacker.forEach((targetPlayerId, stealsByAttacker) -> {
+            PlayerEntity target = playersById.get(targetPlayerId);
+            for (Map.Entry<String, Integer> entry : stealsByAttacker.entrySet()) {
+                PlayerEntity attacker = playersById.get(entry.getKey());
+                for (int i = 0; i < entry.getValue(); i++) {
+                    if (target.getTokens() > 0) {
+                        target.setTokens(target.getTokens() - 1);
+                        attacker.setTokens(attacker.getTokens() + 1);
+                        logs.add(attacker.getName() + " stole 1 token from " + target.getName() + ".");
+                    } else {
+                        logs.add(attacker.getName() + " tried to steal from " + target.getName()
+                                + ", but " + target.getName() + " had no tokens.");
+                    }
+                }
+            }
+        });
+    }
+
+    private void resolveEliminations(MatchEntity match, List<String> logs) {
+        match.getPlayers()
+                .stream()
+                .filter(player -> player.getHearts() <= 0)
+                .forEach(player -> {
+                    String message = player.getName() + " was eliminated.";
+                    if (!logs.contains(message)) {
+                        logs.add(message);
+                    }
+                });
+    }
+
+    private String buildRoundSummary(List<String> actionLogs) {
+        if (actionLogs.isEmpty()) {
+            return "No combat actions were resolved.";
+        }
+        return actionLogs.get(actionLogs.size() - 1);
+    }
+
+    private Optional<PlayerEntity> determineWinner(MatchEntity match) {
+        List<PlayerEntity> alivePlayers = match.getPlayers()
+                .stream()
+                .filter(player -> player.getHearts() > 0)
+                .toList();
+        return alivePlayers.size() == 1 ? Optional.of(alivePlayers.get(0)) : Optional.empty();
     }
 
     /**
@@ -634,16 +995,9 @@ public class MatchServiceImpl implements MatchService {
      *
      * @param match match to finish
      */
-    private void finishMatch(MatchEntity match) {
+    private void finishMatch(MatchEntity match, PlayerEntity winner) {
         match.setStatus(MatchStatus.FINISHED);
-        if (match.getPlayers().isEmpty()) {
-            return;
-        }
-
-        PlayerEntity winner = match.getPlayers().stream()
-                .max((left, right) -> left.getTokens().compareTo(right.getTokens()))
-                .orElse(match.getPlayers().get(0));
-
+        match.setWinnerPlayerId(winner.getId());
         match.getPlayers().forEach(player -> {
             if (player.getId().equals(winner.getId())) {
                 player.setWins(player.getWins() + 1);

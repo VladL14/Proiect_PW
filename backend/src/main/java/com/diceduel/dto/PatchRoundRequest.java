@@ -8,6 +8,7 @@ import java.util.List;
 public record PatchRoundRequest(
         RoundStatus status,
         List<DiceFace> dice,
-        List<Boolean> locked
+        List<Boolean> locked,
+        List<RoundPlayerStateRequest> playerStates
 ) {
 }

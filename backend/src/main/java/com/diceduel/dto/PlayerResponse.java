@@ -4,6 +4,7 @@ public record PlayerResponse(
         String id,
         String name,
         Integer hearts,
-        Integer tokens
+        Integer tokens,
+        Boolean eliminated
 ) {
 }

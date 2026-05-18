@@ -7,8 +7,13 @@ import java.util.List;
 
 public record RoundResponse(
         String id,
+        Integer roundNumber,
         RoundStatus status,
         List<DiceFace> dice,
-        List<Boolean> locked
+        List<Boolean> locked,
+        List<String> targetPlayerIds,
+        List<RoundPlayerStateResponse> playerStates,
+        String roundSummary,
+        List<String> actionLogs
 ) {
 }

@@ -9,6 +9,7 @@ import java.util.List;
 public record UpdateRoundRequest(
         @NotNull RoundStatus status,
         @NotNull List<DiceFace> dice,
-        @NotNull List<Boolean> locked
+        @NotNull List<Boolean> locked,
+        List<RoundPlayerStateRequest> playerStates
 ) {
 }
