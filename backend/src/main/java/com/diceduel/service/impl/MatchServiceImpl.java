@@ -32,7 +32,10 @@ import com.diceduel.repository.AbilityRepository;
 import com.diceduel.repository.MatchRepository;
 import com.diceduel.repository.PlayerRepository;
 import com.diceduel.repository.RoundRepository;
+import com.diceduel.service.MatchHistoryService;
 import com.diceduel.service.MatchService;
+import com.diceduel.service.ReplayBuilder;
+import com.diceduel.dto.ReplayResponse;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,6 +65,8 @@ public class MatchServiceImpl implements MatchService {
     private final AbilityRepository abilityRepository;
     private final MatchMapper matchMapper;
     private final RoundMapper roundMapper;
+    private final MatchHistoryService matchHistoryService;
+    private final ReplayBuilder replayBuilder;
     private final Random random = new Random();
 
     public MatchServiceImpl(
@@ -70,7 +75,9 @@ public class MatchServiceImpl implements MatchService {
             RoundRepository roundRepository,
             AbilityRepository abilityRepository,
             MatchMapper matchMapper,
-            RoundMapper roundMapper
+            RoundMapper roundMapper,
+            MatchHistoryService matchHistoryService,
+            ReplayBuilder replayBuilder
     ) {
         this.matchRepository = matchRepository;
         this.playerRepository = playerRepository;
@@ -78,6 +85,8 @@ public class MatchServiceImpl implements MatchService {
         this.abilityRepository = abilityRepository;
         this.matchMapper = matchMapper;
         this.roundMapper = roundMapper;
+        this.matchHistoryService = matchHistoryService;
+        this.replayBuilder = replayBuilder;
     }
 
     @Override
@@ -374,6 +383,8 @@ public class MatchServiceImpl implements MatchService {
             actionLogs.add("The match ended. " + winner.get().getName() + " won the duel.");
             round.setActionLogs(actionLogs);
             round.setRoundSummary(buildRoundSummary(actionLogs));
+            matchRepository.save(match);
+            matchHistoryService.recordFinishedMatch(match, aggregateMatchEvents(match));
         } else {
             createNextRound(match, round.getRoundNumber() + 1);
         }
@@ -401,8 +412,37 @@ public class MatchServiceImpl implements MatchService {
     @Transactional(readOnly = true)
     public ByteArrayResource exportReplay(String matchId) {
         MatchEntity match = findMatchEntity(matchId);
+        enforceReplayAccess(match);
         String replay = buildReplay(match);
         return new ByteArrayResource(replay.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReplayResponse exportReplayJson(String matchId) {
+        MatchEntity match = findMatchEntity(matchId);
+        enforceReplayAccess(match);
+        return replayBuilder.build(match);
+    }
+
+    /**
+     * Replay ownership ACL: administrators see every replay, regular users only
+     * replays of matches they took part in. Anonymous callers (no token) are
+     * tolerated so local development and contract tests keep working, but an
+     * authenticated non-participant is rejected.
+     *
+     * @param match match whose replay is requested
+     */
+    private void enforceReplayAccess(MatchEntity match) {
+        if (!com.diceduel.security.CurrentUser.isAuthenticated() || com.diceduel.security.CurrentUser.isAdmin()) {
+            return;
+        }
+        String callerId = com.diceduel.security.CurrentUser.playerId();
+        boolean participant = match.getPlayers().stream()
+                .anyMatch(player -> player.getId().equals(callerId));
+        if (!participant) {
+            throw new com.diceduel.exception.ForbiddenException("You can only access replays of your own matches");
+        }
     }
 
     /**
@@ -1004,7 +1044,28 @@ public class MatchServiceImpl implements MatchService {
             } else {
                 player.setLosses(player.getLosses() + 1);
             }
+            int played = player.getMatchesPlayed() == null ? 0 : player.getMatchesPlayed();
+            player.setMatchesPlayed(played + 1);
         });
+    }
+
+    /**
+     * Collects the chronological action log across every round of the match,
+     * used as the stored "important events" of a finished match.
+     *
+     * @param match finished match
+     * @return ordered list of events
+     */
+    private List<String> aggregateMatchEvents(MatchEntity match) {
+        List<String> events = new ArrayList<>();
+        match.getRounds().stream()
+                .sorted(Comparator.comparing(RoundEntity::getRoundNumber))
+                .forEach(round -> {
+                    if (round.getActionLogs() != null) {
+                        events.addAll(round.getActionLogs());
+                    }
+                });
+        return events;
     }
 
     /**

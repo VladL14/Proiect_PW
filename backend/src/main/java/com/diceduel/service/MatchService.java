@@ -14,6 +14,7 @@ import com.diceduel.dto.SetDiceTargetsRequest;
 import com.diceduel.dto.UpdateLockedDiceRequest;
 import com.diceduel.dto.UpdateMatchRequest;
 import com.diceduel.dto.UpdateMatchStatusRequest;
+import com.diceduel.dto.ReplayResponse;
 import com.diceduel.dto.UpdateRoundRequest;
 import com.diceduel.entity.MatchStatus;
 import org.springframework.core.io.ByteArrayResource;
@@ -145,4 +146,13 @@ public interface MatchService {
      * @return replay file resource
      */
     ByteArrayResource exportReplay(String matchId);
+
+    /**
+     * Exports a structured JSON replay for one match. Access is restricted to
+     * the match participants and administrators when the caller is authenticated.
+     *
+     * @param matchId match identifier
+     * @return structured replay
+     */
+    ReplayResponse exportReplayJson(String matchId);
 }

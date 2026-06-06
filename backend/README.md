@@ -19,11 +19,57 @@ src/main/java/com/diceduel
 
 ## REST Resource Categories
 
-- Players: `/api/players`, `/api/players/{playerId}`, stats, abilities, avatar operations.
-- Matches: `/api/matches`, filtered match listing, match state, join/start/status/player removal.
-- Rounds: `/api/matches/{matchId}/rounds`, round details, roll, lock, locked-dice, resolve.
+- Auth: `/api/auth/register`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/me`.
+- Players: `/api/players`, `/api/players/{playerId}`, stats, history, abilities, avatar operations.
+- Matches: `/api/matches`, filtered match listing, match state, join/start/status/player removal, JSON replay.
+- Rounds: `/api/matches/{matchId}/rounds`, round details, roll, lock, locked-dice, target, resolve.
 - Abilities: `/api/abilities`, player abilities, ability activation.
-- Files and ability packs: avatar upload/replacement/removal, replay export, ability-pack import and metadata management.
+- Emotes (social): `/api/matches/{matchId}/emotes` (send + poll), with membership validation and a 3s cooldown.
+- Admin (ADMIN role only): `/api/admin/users`, `/api/admin/matches`, `/api/admin/match-history`, `/api/admin/server-status`.
+- Files and ability packs: avatar upload/replacement/removal, replay export (text), ability-pack import and metadata management.
+- Real-time game protocol: WebSocket at `ws://localhost:3000/ws/game` (see below).
+
+## Authentication & ACL
+
+Accounts are created through `/api/auth/register` (passwords are hashed with
+PBKDF2WithHmacSHA256 — never stored in clear text). Login returns a bearer
+token that must be sent as `Authorization: Bearer <token>`. Roles are
+`GUEST`, `USER`, `ADMIN`. The backend is the source of truth: ACL-protected
+handlers are guarded by `@RequireRole`, so a request is rejected with `401`
+(unauthenticated) or `403` (wrong role) regardless of what the frontend shows.
+
+A default administrator is seeded on first start:
+
+```text
+username: admin
+password: admin123
+```
+
+## Separate Real-Time Game Protocol (WebSocket)
+
+A JSON, message-oriented protocol is exposed at `ws://localhost:3000/ws/game`.
+Every frame is a JSON object with a `type` discriminator. Inbound:
+`CONNECT`, `JOIN_LOBBY`, `START_GAME`, `ACTION`, `STATE_SYNC`, `EMOTE`.
+Outbound: `CONNECT_ACK`, `STATE`, `EMOTE`, relays of lobby/action messages, and
+`ERROR`. The authoritative game logic stays in the REST/service layer; the
+socket provides the real-time fan-out to every client in a match room and is
+consumed identically by the web client, the Android client, an A-Frame scene or
+a test bot.
+
+## HTTPS
+
+By default the API serves HTTP on port 3000 for local development. To serve
+HTTPS (so credentials, tokens, account data and match history are never sent in
+clear text), generate a development keystore and run the `secure` profile:
+
+```bash
+keytool -genkeypair -alias diceduel -keyalg RSA -keysize 2048 \
+        -storetype PKCS12 -keystore src/main/resources/keystore.p12 \
+        -validity 365 -storepass changeit -dname "CN=localhost"
+
+mvn spring-boot:run -Dspring-boot.run.profiles=secure
+# -> https://localhost:8443/api
+```
 
 The OpenAPI specification is available in both:
 
