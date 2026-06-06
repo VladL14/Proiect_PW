@@ -151,6 +151,36 @@ class AuthAclSocialTests {
                 .andExpect(status().isForbidden());
     }
 
+    @Test
+    void suspendedAccountCannotCreateMatch() throws Exception {
+        String username = "suspended-host-" + suffix();
+        String token = register(username, username + "@diceduel.test", "secret123", "Suspended Host");
+        String playerId = accountId(token);
+        suspendAccount(playerId);
+
+        mockMvc.perform(post("/api/matches")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"hostPlayerId\":\"" + playerId + "\",\"maxPlayers\":2}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Suspended accounts cannot create or join matches"));
+    }
+
+    @Test
+    void suspendedAccountCannotJoinMatch() throws Exception {
+        String hostId = createPlayer("Active Host");
+        String matchId = createMatch(hostId);
+        String username = "suspended-guest-" + suffix();
+        String token = register(username, username + "@diceduel.test", "secret123", "Suspended Guest");
+        String suspendedPlayerId = accountId(token);
+        suspendAccount(suspendedPlayerId);
+
+        mockMvc.perform(post("/api/matches/{matchId}/join", matchId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"playerId\":\"" + suspendedPlayerId + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.message").value("Suspended accounts cannot create or join matches"));
+    }
+
     // --------------------------------------------------------------- emotes ---
 
     @Test
@@ -232,6 +262,12 @@ class AuthAclSocialTests {
                 .andExpect(status().isOk())
                 .andReturn();
         return objectMapper.readTree(result.getResponse().getContentAsString()).get("id").asText();
+    }
+
+    private void suspendAccount(String playerId) {
+        PlayerEntity player = playerRepository.findById(playerId).orElseThrow();
+        player.setAccountStatus(AccountStatus.SUSPENDED);
+        playerRepository.save(player);
     }
 
     private String seedAdminAndLogin() throws Exception {

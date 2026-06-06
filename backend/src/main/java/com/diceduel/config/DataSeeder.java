@@ -60,7 +60,7 @@ public class DataSeeder {
                 UUID.randomUUID().toString(),
                 "Administrator",
                 3,
-                0,
+                3,
                 0,
                 0
         );

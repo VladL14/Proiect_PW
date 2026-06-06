@@ -91,6 +91,15 @@ public class MatchController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/{matchId}/leave")
+    public ResponseEntity<Void> leaveMatch(
+            @PathVariable String matchId,
+            @Valid @RequestBody JoinMatchRequest request
+    ) {
+        matchService.leaveMatch(matchId, request);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{matchId}/start")
     public ResponseEntity<Void> startMatch(@PathVariable String matchId) {
         matchService.startMatch(matchId);

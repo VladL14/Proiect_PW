@@ -52,10 +52,15 @@ public class RoundMapper {
     ) {
         String playerName = player == null ? "Unknown Player" : player.getName();
         boolean eliminated = player != null && player.getHearts() <= 0;
-        int shieldCount = Math.toIntExact(state.getDice()
-                .stream()
-                .filter(face -> face == DiceFace.SHIELD)
-                .count());
+        int shieldCount = 0;
+        for (int i = 0; i < state.getDice().size(); i++) {
+            boolean locked = state.getLocked() != null
+                    && i < state.getLocked().size()
+                    && Boolean.TRUE.equals(state.getLocked().get(i));
+            if (state.getDice().get(i) == DiceFace.SHIELD && locked) {
+                shieldCount++;
+            }
+        }
 
         return new RoundPlayerStateResponse(
                 state.getPlayerId(),

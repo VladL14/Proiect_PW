@@ -66,6 +66,8 @@ public interface MatchService {
 
     void removePlayerFromMatch(String matchId, String playerId);
 
+    void leaveMatch(String matchId, JoinMatchRequest request);
+
     /**
      * Starts a ready match and creates its first round.
      *
