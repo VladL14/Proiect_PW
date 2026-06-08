@@ -5,21 +5,25 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
+import java.util.Arrays;
+
 @Configuration
 public class CorsConfig implements WebMvcConfigurer {
 
-    /**
-     * Allowed browser origins, configurable through the
-     * {@code app.cors.allowed-origins} property (env var APP_CORS_ORIGINS).
-     * Defaults to the local development origins.
-     */
     @Value("${app.cors.allowed-origins}")
     private String[] allowedOrigins;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
+        // Trim whitespace and trailing slashes so env-var values like
+        // "https://example.com/" or " https://example.com" still match.
+        String[] cleaned = Arrays.stream(allowedOrigins)
+                .map(String::trim)
+                .map(o -> o.endsWith("/") ? o.substring(0, o.length() - 1) : o)
+                .toArray(String[]::new);
+
         registry.addMapping("/api/**")
-                .allowedOrigins(allowedOrigins)
+                .allowedOrigins(cleaned)
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .exposedHeaders("Authorization")
