@@ -1,0 +1,30 @@
+# Render Blueprint — deploy the Dice Duel backend as a Docker service.
+#
+# Trebuie sa fie la radacina repo-ului Proiect_PW (langa folderul backend/).
+# Render il citeste automat cand conectezi repo-ul prin Blueprint.
+
+services:
+  - type: web
+    name: dice-duel-api
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+
+    envVars:
+      # -----------------------------------------------------------------------
+      # Seteaza DUPA primul deploy. Valoare = https://<serviciu>.onrender.com
+      # (fara slash la final, fara /api)
+      # -----------------------------------------------------------------------
+      - key: APP_PUBLIC_BASE_URL
+        sync: false
+
+      # -----------------------------------------------------------------------
+      # Seteaza DUPA deploy-ul de Netlify. Valoare = https://<site>.netlify.app
+      # -----------------------------------------------------------------------
+      - key: APP_CORS_ORIGINS
+        sync: false
+
+      # Activeaza profilul prod (H2 pe fisier, consola H2 dezactivata).
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
