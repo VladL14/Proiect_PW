@@ -50,7 +50,7 @@ public class MatchMapper {
                 winner == null ? null : winner.getName(),
                 Math.toIntExact(match.getPlayers().stream().filter(player -> player.getHearts() > 0).count()),
                 latestLoggedRound.map(RoundEntity::getRoundSummary).orElse(null),
-                latestLoggedRound.map(round -> List.copyOf(round.getActionLogs())).orElse(List.of())
+                aggregateActionLogs(match)
         );
     }
 
@@ -75,6 +75,15 @@ public class MatchMapper {
                 .stream()
                 .filter(round -> round.getActionLogs() != null && !round.getActionLogs().isEmpty())
                 .max(Comparator.comparing(RoundEntity::getRoundNumber));
+    }
+
+    private List<String> aggregateActionLogs(MatchEntity match) {
+        return match.getRounds()
+                .stream()
+                .sorted(Comparator.comparing(RoundEntity::getRoundNumber))
+                .filter(round -> round.getActionLogs() != null)
+                .flatMap(round -> round.getActionLogs().stream())
+                .toList();
     }
 
     private String findCurrentTurnPlayerId(MatchEntity match) {

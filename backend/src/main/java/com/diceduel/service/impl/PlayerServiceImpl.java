@@ -28,7 +28,7 @@ import java.util.UUID;
 public class PlayerServiceImpl implements PlayerService {
 
     private static final int DEFAULT_HEARTS = 3;
-    private static final int DEFAULT_TOKENS = 0;
+    private static final int DEFAULT_TOKENS = 6;
 
     private final PlayerRepository playerRepository;
     private final AbilityRepository abilityRepository;

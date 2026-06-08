@@ -5,6 +5,7 @@ import com.diceduel.dto.JoinMatchRequest;
 import com.diceduel.dto.MatchResponse;
 import com.diceduel.dto.MatchStateResponse;
 import com.diceduel.dto.PatchMatchRequest;
+import com.diceduel.dto.ReplayResponse;
 import com.diceduel.dto.UpdateMatchRequest;
 import com.diceduel.dto.UpdateMatchStatusRequest;
 import com.diceduel.entity.MatchStatus;
@@ -90,6 +91,15 @@ public class MatchController {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/{matchId}/leave")
+    public ResponseEntity<Void> leaveMatch(
+            @PathVariable String matchId,
+            @Valid @RequestBody JoinMatchRequest request
+    ) {
+        matchService.leaveMatch(matchId, request);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/{matchId}/start")
     public ResponseEntity<Void> startMatch(@PathVariable String matchId) {
         matchService.startMatch(matchId);
@@ -107,5 +117,10 @@ public class MatchController {
     @GetMapping("/{matchId}/state")
     public ResponseEntity<MatchStateResponse> findMatchState(@PathVariable String matchId) {
         return ResponseEntity.ok(matchService.findMatchState(matchId));
+    }
+
+    @GetMapping("/{matchId}/replay")
+    public ResponseEntity<ReplayResponse> exportReplayJson(@PathVariable String matchId) {
+        return ResponseEntity.ok(matchService.exportReplayJson(matchId));
     }
 }

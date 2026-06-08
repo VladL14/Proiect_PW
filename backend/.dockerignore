@@ -1,0 +1,6 @@
+target/
+*.log
+.idea/
+.git/
+data/
+HELP.md

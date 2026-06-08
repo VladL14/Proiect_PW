@@ -16,6 +16,7 @@ import com.diceduel.dto.UpdateLockedDiceRequest;
 import com.diceduel.dto.UpdateMatchRequest;
 import com.diceduel.dto.UpdateMatchStatusRequest;
 import com.diceduel.dto.UpdateRoundRequest;
+import com.diceduel.entity.AccountStatus;
 import com.diceduel.entity.AbilityEntity;
 import com.diceduel.entity.DiceFace;
 import com.diceduel.entity.MatchEntity;
@@ -25,6 +26,7 @@ import com.diceduel.entity.RoundEntity;
 import com.diceduel.entity.RoundPlayerStateEntity;
 import com.diceduel.entity.RoundStatus;
 import com.diceduel.exception.BadRequestException;
+import com.diceduel.exception.ForbiddenException;
 import com.diceduel.exception.ResourceNotFoundException;
 import com.diceduel.mapper.MatchMapper;
 import com.diceduel.mapper.RoundMapper;
@@ -32,7 +34,10 @@ import com.diceduel.repository.AbilityRepository;
 import com.diceduel.repository.MatchRepository;
 import com.diceduel.repository.PlayerRepository;
 import com.diceduel.repository.RoundRepository;
+import com.diceduel.service.MatchHistoryService;
 import com.diceduel.service.MatchService;
+import com.diceduel.service.ReplayBuilder;
+import com.diceduel.dto.ReplayResponse;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,7 +59,12 @@ import java.util.UUID;
 public class MatchServiceImpl implements MatchService {
 
     private static final int DEFAULT_MAX_PLAYERS = 2;
+    private static final int DEFAULT_HEARTS = 3;
+    private static final int DEFAULT_TOKENS = 6;
     private static final int DICE_COUNT = 5;
+    private static final String POWER_STRIKE_ABILITY_ID = "power-strike";
+    private static final String SHIELD_WALL_ABILITY_ID = "shield-wall";
+    private static final String TOKEN_STEAL_ABILITY_ID = "token-steal";
 
     private final MatchRepository matchRepository;
     private final PlayerRepository playerRepository;
@@ -62,6 +72,8 @@ public class MatchServiceImpl implements MatchService {
     private final AbilityRepository abilityRepository;
     private final MatchMapper matchMapper;
     private final RoundMapper roundMapper;
+    private final MatchHistoryService matchHistoryService;
+    private final ReplayBuilder replayBuilder;
     private final Random random = new Random();
 
     public MatchServiceImpl(
@@ -70,7 +82,9 @@ public class MatchServiceImpl implements MatchService {
             RoundRepository roundRepository,
             AbilityRepository abilityRepository,
             MatchMapper matchMapper,
-            RoundMapper roundMapper
+            RoundMapper roundMapper,
+            MatchHistoryService matchHistoryService,
+            ReplayBuilder replayBuilder
     ) {
         this.matchRepository = matchRepository;
         this.playerRepository = playerRepository;
@@ -78,11 +92,14 @@ public class MatchServiceImpl implements MatchService {
         this.abilityRepository = abilityRepository;
         this.matchMapper = matchMapper;
         this.roundMapper = roundMapper;
+        this.matchHistoryService = matchHistoryService;
+        this.replayBuilder = replayBuilder;
     }
 
     @Override
     public MatchResponse createMatch(CreateMatchRequest request) {
         PlayerEntity host = findPlayer(request.hostPlayerId());
+        validateAccountCanEnterLobby(host);
 
         MatchEntity match = new MatchEntity();
         match.setId(UUID.randomUUID().toString());
@@ -156,6 +173,7 @@ public class MatchServiceImpl implements MatchService {
         MatchEntity match = findMatchEntity(matchId);
         PlayerEntity player = findPlayer(request.playerId());
 
+        validateAccountCanEnterLobby(player);
         validateMatchJoinable(match, player);
         match.getPlayers().add(player);
 
@@ -176,6 +194,17 @@ public class MatchServiceImpl implements MatchService {
         }
         refreshLobbyStatus(match);
         matchRepository.save(match);
+    }
+
+    @Override
+    public void leaveMatch(String matchId, JoinMatchRequest request) {
+        MatchEntity match = findMatchEntity(matchId);
+        PlayerEntity player = validatePlayerInMatch(match, request.playerId());
+        if (match.getStatus() == MatchStatus.FINISHED) {
+            player.setHearts(DEFAULT_HEARTS);
+            player.setTokens(DEFAULT_TOKENS);
+            playerRepository.save(player);
+        }
     }
 
     @Override
@@ -303,6 +332,11 @@ public class MatchServiceImpl implements MatchService {
         mirrorLegacyRoundDice(round, playerState);
         round.setStatus(RoundStatus.TARGET_SELECTION);
         round.setRoundSummary(player.getName() + " locked " + request.lockedIndexes().size() + " dice.");
+        int lockedShields = countLockedShields(playerState);
+        if (lockedShields > 0) {
+            round.getActionLogs().add(player.getName() + " locked " + lockedShields + " shield die"
+                    + (lockedShields == 1 ? "." : "s."));
+        }
         return roundMapper.toResponse(roundRepository.save(round));
     }
 
@@ -362,7 +396,8 @@ public class MatchServiceImpl implements MatchService {
             throw new BadRequestException("Round is already resolved");
         }
 
-        List<String> actionLogs = resolveRoundCombat(round);
+        List<String> actionLogs = new ArrayList<>(round.getActionLogs() == null ? List.of() : round.getActionLogs());
+        actionLogs.addAll(resolveRoundCombat(round));
         round.setActionLogs(actionLogs);
         round.setRoundSummary(buildRoundSummary(actionLogs));
         round.setStatus(RoundStatus.RESOLVED);
@@ -374,6 +409,8 @@ public class MatchServiceImpl implements MatchService {
             actionLogs.add("The match ended. " + winner.get().getName() + " won the duel.");
             round.setActionLogs(actionLogs);
             round.setRoundSummary(buildRoundSummary(actionLogs));
+            matchRepository.save(match);
+            matchHistoryService.recordFinishedMatch(match, aggregateMatchEvents(match));
         } else {
             createNextRound(match, round.getRoundNumber() + 1);
         }
@@ -387,22 +424,64 @@ public class MatchServiceImpl implements MatchService {
         PlayerEntity player = findPlayer(request.playerId());
         AbilityEntity ability = abilityRepository.findById(request.abilityId())
                 .orElseThrow(() -> new ResourceNotFoundException("Ability not found: " + request.abilityId()));
+        MatchEntity match = round.getMatch();
 
-        validatePlayerInMatch(round.getMatch(), player.getId());
+        validatePlayerInMatch(match, player.getId());
+        validatePlayerAlive(player);
         validateAbilityCanBeActivated(round, player, ability);
 
         player.setTokens(player.getTokens() - ability.getCost());
+        applyAbilityEffect(match, round, player, ability, request.targetId());
         round.setStatus(RoundStatus.ABILITY_PHASE);
-        playerRepository.save(player);
-        roundRepository.save(round);
+
+        Optional<PlayerEntity> winner = determineWinner(match);
+        if (winner.isPresent()) {
+            finishMatch(match, winner.get());
+            round.getActionLogs().add("The match ended. " + winner.get().getName() + " won the duel.");
+            round.setRoundSummary(buildRoundSummary(round.getActionLogs()));
+            matchRepository.save(match);
+            matchHistoryService.recordFinishedMatch(match, aggregateMatchEvents(match));
+        } else {
+            roundRepository.save(round);
+            playerRepository.save(player);
+        }
     }
 
     @Override
     @Transactional(readOnly = true)
     public ByteArrayResource exportReplay(String matchId) {
         MatchEntity match = findMatchEntity(matchId);
+        enforceReplayAccess(match);
         String replay = buildReplay(match);
         return new ByteArrayResource(replay.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReplayResponse exportReplayJson(String matchId) {
+        MatchEntity match = findMatchEntity(matchId);
+        enforceReplayAccess(match);
+        return replayBuilder.build(match);
+    }
+
+    /**
+     * Replay ownership ACL: administrators see every replay, regular users only
+     * replays of matches they took part in. Anonymous callers (no token) are
+     * tolerated so local development and contract tests keep working, but an
+     * authenticated non-participant is rejected.
+     *
+     * @param match match whose replay is requested
+     */
+    private void enforceReplayAccess(MatchEntity match) {
+        if (!com.diceduel.security.CurrentUser.isAuthenticated() || com.diceduel.security.CurrentUser.isAdmin()) {
+            return;
+        }
+        String callerId = com.diceduel.security.CurrentUser.playerId();
+        boolean participant = match.getPlayers().stream()
+                .anyMatch(player -> player.getId().equals(callerId));
+        if (!participant) {
+            throw new com.diceduel.exception.ForbiddenException("You can only access replays of your own matches");
+        }
     }
 
     /**
@@ -521,6 +600,12 @@ public class MatchServiceImpl implements MatchService {
         }
         if (match.getPlayers().size() >= match.getMaxPlayers()) {
             throw new BadRequestException("Match is full");
+        }
+    }
+
+    private void validateAccountCanEnterLobby(PlayerEntity player) {
+        if (player.getAccountStatus() == AccountStatus.SUSPENDED) {
+            throw new ForbiddenException("Suspended accounts cannot create or join matches");
         }
     }
 
@@ -659,6 +744,43 @@ public class MatchServiceImpl implements MatchService {
             }
         }
         return targets;
+    }
+
+    private boolean isLocked(RoundPlayerStateEntity playerState, int index) {
+        return playerState.getLocked() != null
+                && index < playerState.getLocked().size()
+                && Boolean.TRUE.equals(playerState.getLocked().get(index));
+    }
+
+    private int countLockedShields(RoundPlayerStateEntity playerState) {
+        int shields = 0;
+        for (int i = 0; i < playerState.getDice().size(); i++) {
+            if (playerState.getDice().get(i) == DiceFace.SHIELD && isLocked(playerState, i)) {
+                shields++;
+            }
+        }
+        return shields;
+    }
+
+    private void consumeLockedShields(RoundPlayerStateEntity playerState, int blockedAttacks) {
+        if (playerState == null || blockedAttacks <= 0) {
+            return;
+        }
+        int remainingToConsume = blockedAttacks;
+        for (int i = playerState.getDice().size() - 1; i >= 0 && remainingToConsume > 0; i--) {
+            if (playerState.getDice().get(i) == DiceFace.SHIELD && isLocked(playerState, i)) {
+                playerState.getDice().remove(i);
+                if (playerState.getLocked() != null && i < playerState.getLocked().size()) {
+                    playerState.getLocked().remove(i);
+                }
+                if (playerState.getTargetPlayerIds() != null && i < playerState.getTargetPlayerIds().size()) {
+                    playerState.getTargetPlayerIds().remove(i);
+                }
+                remainingToConsume--;
+            }
+        }
+        playerState.setLocked(ensureLockList(playerState.getLocked()));
+        playerState.setTargetPlayerIds(ensureTargetList(playerState.getTargetPlayerIds()));
     }
 
     private RoundPlayerStateEntity createPlayerState(RoundEntity round, PlayerEntity player, int turnOrder) {
@@ -837,6 +959,8 @@ public class MatchServiceImpl implements MatchService {
         MatchEntity match = round.getMatch();
         Map<String, PlayerEntity> playersById = new LinkedHashMap<>();
         match.getPlayers().forEach(player -> playersById.put(player.getId(), player));
+        Map<String, RoundPlayerStateEntity> playerStatesById = new LinkedHashMap<>();
+        sortedPlayerStates(round).forEach(state -> playerStatesById.put(state.getPlayerId(), state));
 
         validateRequiredTargets(round);
 
@@ -852,7 +976,7 @@ public class MatchServiceImpl implements MatchService {
             List<String> targets = ensureTargetList(playerState.getTargetPlayerIds());
             for (int i = 0; i < playerState.getDice().size(); i++) {
                 DiceFace face = playerState.getDice().get(i);
-                if (face == DiceFace.SHIELD) {
+                if (face == DiceFace.SHIELD && isLocked(playerState, i)) {
                     shieldsByPlayer.merge(playerState.getPlayerId(), 1, Integer::sum);
                 } else if (face == DiceFace.ATTACK) {
                     addTargetedAction(attacksByTargetAndAttacker, targets.get(i), playerState.getPlayerId());
@@ -863,7 +987,7 @@ public class MatchServiceImpl implements MatchService {
         }
 
         List<String> logs = new ArrayList<>();
-        resolveAttacks(playersById, attacksByTargetAndAttacker, shieldsByPlayer, logs);
+        resolveAttacks(playersById, playerStatesById, attacksByTargetAndAttacker, shieldsByPlayer, logs);
         resolveSteals(playersById, stealsByTargetAndAttacker, logs);
         resolveEliminations(match, logs);
         return logs;
@@ -878,7 +1002,10 @@ public class MatchServiceImpl implements MatchService {
             List<String> targets = ensureTargetList(playerState.getTargetPlayerIds());
             for (int i = 0; i < playerState.getDice().size(); i++) {
                 DiceFace face = playerState.getDice().get(i);
-                if (face == DiceFace.ATTACK || face == DiceFace.STEAL) {
+                String targetPlayerId = targets.get(i);
+                if ((face == DiceFace.ATTACK || face == DiceFace.STEAL)
+                        && targetPlayerId != null
+                        && !targetPlayerId.isBlank()) {
                     validateTarget(round.getMatch(), playerState.getPlayerId(), targets.get(i));
                 }
             }
@@ -897,6 +1024,9 @@ public class MatchServiceImpl implements MatchService {
             String targetPlayerId,
             String actingPlayerId
     ) {
+        if (targetPlayerId == null || targetPlayerId.isBlank()) {
+            return;
+        }
         actionsByTargetAndAttacker
                 .computeIfAbsent(targetPlayerId, ignored -> new LinkedHashMap<>())
                 .merge(actingPlayerId, 1, Integer::sum);
@@ -904,6 +1034,7 @@ public class MatchServiceImpl implements MatchService {
 
     private void resolveAttacks(
             Map<String, PlayerEntity> playersById,
+            Map<String, RoundPlayerStateEntity> playerStatesById,
             Map<String, Map<String, Integer>> attacksByTargetAndAttacker,
             Map<String, Integer> shieldsByPlayer,
             List<String> logs
@@ -912,6 +1043,7 @@ public class MatchServiceImpl implements MatchService {
             PlayerEntity target = playersById.get(targetPlayerId);
             int shieldsRemaining = shieldsByPlayer.getOrDefault(targetPlayerId, 0);
             int totalDamage = 0;
+            int totalBlocked = 0;
 
             for (Map.Entry<String, Integer> entry : attacksByAttacker.entrySet()) {
                 PlayerEntity attacker = playersById.get(entry.getKey());
@@ -919,11 +1051,13 @@ public class MatchServiceImpl implements MatchService {
                 int blocked = Math.min(attacks, shieldsRemaining);
                 int damage = attacks - blocked;
                 shieldsRemaining -= blocked;
+                totalBlocked += blocked;
                 totalDamage += damage;
                 logs.add(attacker.getName() + " attacked " + target.getName() + ". "
                         + blocked + " attack(s) blocked, " + damage + " damage dealt.");
             }
 
+            consumeLockedShields(playerStatesById.get(targetPlayerId), totalBlocked);
             target.setHearts(Math.max(0, target.getHearts() - totalDamage));
         });
     }
@@ -985,9 +1119,36 @@ public class MatchServiceImpl implements MatchService {
      * @param nextRoundNumber next round number
      */
     private void createNextRound(MatchEntity match, int nextRoundNumber) {
+        Optional<RoundEntity> previousRound = match.getRounds()
+                .stream()
+                .filter(round -> round.getRoundNumber().equals(match.getCurrentRoundNumber()))
+                .findFirst();
         match.setCurrentRoundNumber(nextRoundNumber);
         RoundEntity nextRound = createRound(match, nextRoundNumber);
+        previousRound.ifPresent(round -> carryLockedShields(round, nextRound));
         match.getRounds().add(nextRound);
+    }
+
+    private void carryLockedShields(RoundEntity previousRound, RoundEntity nextRound) {
+        Map<String, Integer> shieldsByPlayer = new LinkedHashMap<>();
+        previousRound.getPlayerStates().forEach(state ->
+                shieldsByPlayer.put(state.getPlayerId(), countLockedShields(state))
+        );
+        nextRound.getPlayerStates().forEach(state -> {
+            int shields = shieldsByPlayer.getOrDefault(state.getPlayerId(), 0);
+            if (shields <= 0) {
+                return;
+            }
+            List<DiceFace> dice = new ArrayList<>();
+            List<Boolean> locked = emptyLockList();
+            for (int i = 0; i < Math.min(shields, DICE_COUNT); i++) {
+                dice.add(DiceFace.SHIELD);
+                locked.set(i, true);
+            }
+            state.setDice(dice);
+            state.setLocked(locked);
+            state.setTargetPlayerIds(ensureTargetList(null));
+        });
     }
 
     /**
@@ -1004,7 +1165,74 @@ public class MatchServiceImpl implements MatchService {
             } else {
                 player.setLosses(player.getLosses() + 1);
             }
+            int played = player.getMatchesPlayed() == null ? 0 : player.getMatchesPlayed();
+            player.setMatchesPlayed(played + 1);
         });
+    }
+
+    /**
+     * Collects the chronological action log across every round of the match,
+     * used as the stored "important events" of a finished match.
+     *
+     * @param match finished match
+     * @return ordered list of events
+     */
+    private List<String> aggregateMatchEvents(MatchEntity match) {
+        List<String> events = new ArrayList<>();
+        match.getRounds().stream()
+                .sorted(Comparator.comparing(RoundEntity::getRoundNumber))
+                .forEach(round -> {
+                    if (round.getActionLogs() != null) {
+                        events.addAll(round.getActionLogs());
+                    }
+                });
+        return events;
+    }
+
+    private void applyAbilityEffect(
+            MatchEntity match,
+            RoundEntity round,
+            PlayerEntity player,
+            AbilityEntity ability,
+            String targetId
+    ) {
+        List<String> logs = round.getActionLogs();
+        switch (ability.getId()) {
+            case POWER_STRIKE_ABILITY_ID -> {
+                PlayerEntity target = validateTarget(match, player.getId(), targetId);
+                target.setHearts(Math.max(0, target.getHearts() - 1));
+                logs.add(player.getName() + " used Power Strike on " + target.getName() + ". 1 damage dealt.");
+                resolveEliminations(match, logs);
+            }
+            case SHIELD_WALL_ABILITY_ID -> {
+                int previousHearts = player.getHearts();
+                player.setHearts(Math.min(DEFAULT_HEARTS, player.getHearts() + 1));
+                if (player.getHearts() > previousHearts) {
+                    logs.add(player.getName() + " used Shield Wall and restored 1 HP.");
+                } else {
+                    logs.add(player.getName() + " used Shield Wall, but was already at full HP.");
+                }
+            }
+            case TOKEN_STEAL_ABILITY_ID -> {
+                int totalStolen = 0;
+                for (PlayerEntity other : match.getPlayers()) {
+                    if (other.getId().equals(player.getId())) {
+                        continue;
+                    }
+                    if (other.getTokens() > 0) {
+                        other.setTokens(other.getTokens() - 1);
+                        player.setTokens(player.getTokens() + 1);
+                        totalStolen++;
+                        logs.add(player.getName() + " used Token Steal and stole 1 token from " + other.getName() + ".");
+                    }
+                }
+                if (totalStolen == 0) {
+                    logs.add(player.getName() + " used Token Steal, but no opponent had tokens to steal.");
+                }
+            }
+            default -> logs.add(player.getName() + " activated " + ability.getName() + ".");
+        }
+        round.setRoundSummary(buildRoundSummary(logs));
     }
 
     /**

@@ -1,10 +1,14 @@
 package com.diceduel.controller;
 
 import com.diceduel.dto.CreatePlayerRequest;
+import com.diceduel.dto.MatchHistoryResponse;
 import com.diceduel.dto.PatchPlayerRequest;
 import com.diceduel.dto.PlayerResponse;
 import com.diceduel.dto.PlayerStatsResponse;
 import com.diceduel.dto.UpdatePlayerRequest;
+import com.diceduel.entity.Role;
+import com.diceduel.security.RequireRole;
+import com.diceduel.service.MatchHistoryService;
 import com.diceduel.service.PlayerService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -28,9 +32,11 @@ import java.util.List;
 public class PlayerController {
 
     private final PlayerService playerService;
+    private final MatchHistoryService matchHistoryService;
 
-    public PlayerController(PlayerService playerService) {
+    public PlayerController(PlayerService playerService, MatchHistoryService matchHistoryService) {
         this.playerService = playerService;
+        this.matchHistoryService = matchHistoryService;
     }
 
     @PostMapping
@@ -73,5 +79,15 @@ public class PlayerController {
     @GetMapping("/{playerId}/stats")
     public ResponseEntity<PlayerStatsResponse> findPlayerStats(@PathVariable String playerId) {
         return ResponseEntity.ok(playerService.findPlayerStats(playerId));
+    }
+
+    /**
+     * Returns the match history of one player. Protected by the ACL: only the
+     * player itself or an administrator may read it (enforced in the service).
+     */
+    @GetMapping("/{playerId}/history")
+    @RequireRole({Role.USER, Role.ADMIN})
+    public ResponseEntity<List<MatchHistoryResponse>> findPlayerHistory(@PathVariable String playerId) {
+        return ResponseEntity.ok(matchHistoryService.findForPlayer(playerId));
     }
 }
