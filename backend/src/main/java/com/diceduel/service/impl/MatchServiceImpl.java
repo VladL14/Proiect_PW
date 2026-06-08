@@ -60,7 +60,7 @@ public class MatchServiceImpl implements MatchService {
 
     private static final int DEFAULT_MAX_PLAYERS = 2;
     private static final int DEFAULT_HEARTS = 3;
-    private static final int DEFAULT_TOKENS = 3;
+    private static final int DEFAULT_TOKENS = 6;
     private static final int DICE_COUNT = 5;
     private static final String POWER_STRIKE_ABILITY_ID = "power-strike";
     private static final String SHIELD_WALL_ABILITY_ID = "shield-wall";
@@ -1214,14 +1214,20 @@ public class MatchServiceImpl implements MatchService {
                 }
             }
             case TOKEN_STEAL_ABILITY_ID -> {
-                PlayerEntity target = validateTarget(match, player.getId(), targetId);
-                if (target.getTokens() > 0) {
-                    target.setTokens(target.getTokens() - 1);
-                    player.setTokens(player.getTokens() + 1);
-                    logs.add(player.getName() + " used Token Steal and stole 1 token from " + target.getName() + ".");
-                } else {
-                    logs.add(player.getName() + " used Token Steal on " + target.getName()
-                            + ", but " + target.getName() + " had no tokens.");
+                int totalStolen = 0;
+                for (PlayerEntity other : match.getPlayers()) {
+                    if (other.getId().equals(player.getId())) {
+                        continue;
+                    }
+                    if (other.getTokens() > 0) {
+                        other.setTokens(other.getTokens() - 1);
+                        player.setTokens(player.getTokens() + 1);
+                        totalStolen++;
+                        logs.add(player.getName() + " used Token Steal and stole 1 token from " + other.getName() + ".");
+                    }
+                }
+                if (totalStolen == 0) {
+                    logs.add(player.getName() + " used Token Steal, but no opponent had tokens to steal.");
                 }
             }
             default -> logs.add(player.getName() + " activated " + ability.getName() + ".");
