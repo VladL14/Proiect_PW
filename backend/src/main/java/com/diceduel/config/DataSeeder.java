@@ -39,8 +39,8 @@ public class DataSeeder {
         if (abilityRepository.count() == 0) {
             abilityRepository.saveAll(List.of(
                     new AbilityEntity("power-strike", "Power Strike", 2),
-                    new AbilityEntity("shield-wall", "Shield Wall", 1),
-                    new AbilityEntity("token-steal", "Token Steal", 3)
+                    new AbilityEntity("shield-wall", "Shield Wall", 2),
+                    new AbilityEntity("token-steal", "Token Steal", 2)
             ));
         }
 
